@@ -22,7 +22,7 @@ import static xiao.λ.Primitives.*;
  *      Compiler + AST : Compiler 这里做了 desugar 的工作,<br>
  *          把表层语言(scheme 子集, 语法参见注释) 编译成 core language (pure lambda) 并消除 free variable<br>
  *      Interpreter + Value : 把 AST 解释成值<br>
- *      FFI : 把 Value 转换成宿主语言的值, 这里是把 Closure 转换成 java value<br>
+ *      FFI : 把 pure lambda 编译成 java lambda, 计算 对应的 java value<br>
  *      PrettyPrinter : 也可以当成 CodeGen 用，雾<br>
  * 大致流程： json-s-expr -> pure-lambda-s-expr -> closure<br>
  * <br>

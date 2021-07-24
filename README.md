@@ -6,7 +6,8 @@
      - Parser : 把代码 (语法用 json array 来表达 s-expr) 转换成 java list 的 s-expr
      - Compiler + AST : Compiler 这里做了 desugar 的工作, 把表层语言(scheme 子集, 语法参见注释) 编译成 core language (pure lambda) 并消除 free variable
      - Interpreter + Value : 把 AST 解释成值
-     - FFI : 把 Value 转换成宿主语言的值, 这里是把 Closure 转换成 java value
+     - FFI : ~把 Value 转换成宿主语言的值, 这里是把 Closure 转换成 java value~ (第一版实现废弃)
+     - FFI : 把 pure lambda 编译成 java lambda, 计算 对应的 java value
      - PrettyPrinter : 也可以当成 CodeGen 用，雾
 
 - 大致流程： json-s-expr -> pure-lambda-s-expr -> closure
