@@ -7,5 +7,4 @@ target/
 .DS_Store
 
 TODO.md
-src/main/java/xiao/objalg
-src/test/java/xiao/objalg
+src/legacy

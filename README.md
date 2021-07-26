@@ -1,14 +1,14 @@
 # λ
 
-> Lambda Calculus Compiler Java Implemented
+> Source to Source Lambda Calculus Compiler
 
 - 代码分为几块:
      - Parser : 把代码 (语法用 json array 来表达 s-expr) 转换成 java list 的 s-expr
-     - Compiler + AST : Compiler 这里做了 desugar 的工作, 把表层语言(scheme 子集, 语法参见注释) 编译成 core language (pure lambda) 并消除 free variable
-     - Interpreter + Value : 把 AST 解释成值
-     - FFI : ~把 Value 转换成宿主语言的值, 这里是把 Closure 转换成 java value~ (第一版实现废弃)
-     - FFI : 把 pure lambda 编译成 java lambda, 计算 对应的 java value
-     - PrettyPrinter : 也可以当成 CodeGen 用，雾
+     - Compiler : desugar, 把表层语言(scheme 子集, 语法参见注释) 编译成 core language (pure lambda) 并消除 free variable, 返回 AST
+     - ~Interpreter + Value : 把 AST 解释成 Value (即Closure)~(废弃)
+     - ~UnChurchification : 把 Value 转换成宿主语言的值, 这里是把 Closure 转换成 java value~ (废弃)
+     - UnChurchification : 把 pure lambda 编译成 java lambda, 计算对应的 java value
+     - CodeGen : pure lambda 生成其他语言代码
 
 - 大致流程： json-s-expr -> pure-lambda-s-expr -> closure
 
@@ -16,16 +16,22 @@
 ## type
 
 ```
- Sym      = String
- Env      = Sym -> Val
- Val      = Closure
- Closure  = Abs * Env
- S-Expr   = List | Map | String | Integer
- Parser   = String -> S-Expr
+ Sym      = Str
+ Abs      = Sym * Expr
+ App      = Expr * Expr
  Expr     = Sym | Abs | App
- Compiler = S-Expr -> Expr
+
+ Val      = Closure
+ Env      = Sym -> Val
+ Closure  = Abs * Env
+
  Apply    = Val * Val -> Val
  Eval     = Expr * Env -> Val
+
+ S-Expr   = List | Map | String | Integer
+ Parser   = Str -> S-Expr
+ Compiler = S-Expr -> Expr
+
 ```
 
 ## 名词
@@ -44,6 +50,7 @@
 ```
 
 ## scheme 子集语法：
+
 ```
   <exp> ::= <var>
          |  #t

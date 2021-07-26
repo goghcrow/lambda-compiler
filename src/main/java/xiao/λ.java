@@ -7,127 +7,43 @@ import java.util.*;
 import java.util.function.Function;
 
 import static xiao.λ.Compiler.compile1;
-import static xiao.λ.FFI.*;
-import static xiao.λ.FFI.listify;
 import static xiao.λ.Names.*;
 import static xiao.λ.Parser.parse;
 import static xiao.λ.Primitives.*;
+import static xiao.λ.UnChurchification.*;
 
 /**
- * λ
- * Lambda Calculus Compiler<br>
- *
- * 代码分为几块:<br>
- *      Parser : 把代码 (语法用 json array 来表达 s-expr) 转换成 java list 的 s-expr<br>
- *      Compiler + AST : Compiler 这里做了 desugar 的工作,<br>
- *          把表层语言(scheme 子集, 语法参见注释) 编译成 core language (pure lambda) 并消除 free variable<br>
- *      Interpreter + Value : 把 AST 解释成值<br>
- *      FFI : 把 pure lambda 编译成 java lambda, 计算 对应的 java value<br>
- *      PrettyPrinter : 也可以当成 CodeGen 用，雾<br>
- * 大致流程： json-s-expr -> pure-lambda-s-expr -> closure<br>
- * <br>
- * ## type<br>
- *  Sym      = String<br>
- *  Env      = Sym -> Val<br>
- *  Val      = Closure<br>
- *  Closure  = Abs * Env<br>
- *  <br>
- *  S-Expr   = List | Map | String | Integer<br>
- *  Parser   = String -> S-Expr<br>
- *  Expr     = Sym | Abs | App<br>
- *  Compiler = S-Expr -> Expr<br>
- *  Apply    = Val * Val -> Val<br>
- *  Eval     = Expr * Env -> Val<br>
- * <br>
- * <br>
- *  ## 缩写 & 一些名词解释：<br>
- *  Sym : Variable Reference, Term  (term > sym > var)<br>
- *  Abs : Abstraction, Lambda, Anonymous Functions<br>
- *  App : Application, Call<br>
- *  bound var<br>
- *  unbound var (free var)<br>
- *  open term : term with unbound var<br>
- *      a closure closes an open term<br>
- *      λa.ab<br>
- *       a of ab: bound var<br>
- *       b of ab: unbound var<br>
- *
- *
- * # scheme 子集语法：<br>
- * <br>
- *   <exp> ::= <var><br>
- * <br>
- *          |  #t<br>
- *          |  #f<br>
- *          |  (if  <exp> <exp> <exp>)<br>
- *          |  (and <exp> <exp>)<br>
- *          |  (or  <exp> <exp>)<br>
- *<br>
- *          |  <nat><br>
- *          |  (zero? <exp>)<br>
- *          |  (- <exp> <exp>)<br>
- *          |  (= <exp> <exp>)<br>
- *          |  (+ <exp> <exp>)<br>
- *          |  (* <exp> <exp>)<br>
- *<br>
- *          |  <lam><br>
- *          |  (let ((<var> <exp>) ...) <exp>)<br>
- *          |  (letrec ((<var> <lam>)) <exp>)<br>
- *<br>
- *          |  (cons <exp> <exp>)<br>
- *          |  (car  <exp>)<br>
- *          |  (cdr  <exp>)<br>
- *          |  (pair? <exp>)<br>
- *          |  (null? <exp>)<br>
- *          |  '()<br>
- *<br>
- *          |  (<exp> <exp> ...)<br>
- *<br>
- *   <lam> ::= (λ (<var> ...) <exp>)<br>
+ * λ<br>
+ * Source to Source Lambda Calculus Compiler <br>
+ * 详情参见 README<br>
  *
  * @author chuxiaofeng
  */
 @SuppressWarnings("NonAsciiCharacters")
 public interface λ {
 
-    // 之所以eval不需要带环境是因为, compiler 已经把需要引用环境的 free var 全部替换掉了
-    // expr 表达式树中都为 closed term
-
-    static Expr             compile(String s)           { return compile(s, compilerEnv()); }
-    static Expr             compile(String s, Env<Expr> env) { return compiler().eval(parse(s), env); }
-    static Closure          eval(Expr s)                { return eval(s, new Env<>(null)); }
-    static Closure          eval(Expr s, Env<Val> env)  { return ((Closure) interpreter().eval(s, env)); }
-    static F                compile(Expr s)             { return compile(s, new Env<>(null)); }
-    static F                compile(Expr s, Env<F> env) { return ffiCompiler().eval(s, env); }
-    static int              natify(F churchNumeral)     { return natifier().eval(churchNumeral, null); }
-    static boolean          boolify(F churchBoolean)    { return boolifier().eval(churchBoolean, null); }
-    static Pair<Integer>    natListify (F churchList)   { return natListifier().eval(churchList, null); }
-    static Pair<Boolean>    boolListify(F churchList)   { return boolListifier().eval(churchList, null); }
-
-    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-    // 声明 Eval 和 👇这部分没啥用东西主要用来展示 Eval<From, To> 类型的
-
-    static Eval<Object, Expr>           compiler()      { return Compiler.self; }
-    static Eval<Expr,   Expr>           expander()      { return Compiler.Expander.self; }
-    static Eval<Expr,   Val>            interpreter()   { return Interp.self; }
-    static Eval<Expr,   F>              ffiCompiler()   { return FFI.Compiler.self; }
-    static Eval<F,      Integer>        natifier()      { return natifier; }
-    static Eval<F,      Boolean>        boolifier()     { return boolifier; }
-    static Eval<F,      Pair<Integer>>  natListifier()  { return natListify; }
-    static Eval<F,      Pair<Boolean>>  boolListifier() { return boolListify; }
-
-    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-    static Env<Expr> compilerEnv() {
-        return bootEnv(expander());
+    static Expr compile(String code) {
+        return compile(code, bootEnv(), CodeGen.expr, null);
     }
 
-    static Env<Val> interpEnv() {
-        return bootEnv(interpreter());
+    static Expr compile(String code, Env<Expr> env) {
+        return compile(code, env, CodeGen.expr, null);
     }
 
-    static <V> Env<V> bootEnv(Eval<Expr, V> eval) {
+    static <Target, Ctx> Target compile(String code, CodeGen<Target, Ctx> gen) {
+        return compile(code, bootEnv(), gen, null);
+    }
+
+    static <Target, Ctx> Target compile(Expr expr, Visitor<Target, Ctx> to, Ctx toEnv) {
+        return to.visit(expr, toEnv);
+    }
+
+    static <Target, Ctx> Target compile(String src, Env<Expr> compilerEnv,
+                                        Visitor<Target, Ctx> to, Ctx toEnv) {
+        return to.visit(Compiler.compile(parse(src), compilerEnv), toEnv);
+    }
+
+    static Env<Expr> bootEnv() {
         Map<String, String> primitives = new LinkedHashMap<>();
         primitives.put(VOID, S_VOID);
 
@@ -139,6 +55,7 @@ public interface λ {
         primitives.put(IS_ZERO, S_IS_ZERO);
         primitives.put(SUM, S_SUM);
         primitives.put(MUL, S_MUL);
+        primitives.put(POW, S_POW);
 
         primitives.put(SUB, S_SUB);
         primitives.put(EQ, S_EQ);
@@ -150,18 +67,16 @@ public interface λ {
         primitives.put(IS_PAIR, S_IS_PAIR);
         primitives.put(IS_NULL, S_IS_NULL);
 
-        Env<V> env = new Env<>(null);
-
-        primitives.forEach((n, s) -> env.put(Sym.of(n), eval.eval(compile1(parse(s)), env)));
+        Env<Expr> env = new Env<>(null);
+        primitives.forEach((n, s) -> env.put(Sym.of(n), Compiler.expander.visit(compile1(parse(s)), env)));
         return env;
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
     /* ----------------------- AST ------------------------ */
     interface Expr {
         default String stringfy() {
-            return CodeGen.scheme(this);
+            return CodeGen.scheme.visit(this, null);
         }
     }
     class Sym implements Expr {
@@ -200,7 +115,6 @@ public interface λ {
         }
     }
 
-
     interface Visitor<V, C> {
         V visit(Sym s, C ctx);
         V visit(App s, C ctx);
@@ -219,24 +133,8 @@ public interface λ {
         }
     }
 
-    /* ----------------------- Value ---------------------- */
-    interface Val { }
-    class Closure implements Val {
-        final Abs abs;
-        final Env<Val> env;
-
-        Closure(Abs abs, Env<Val> env) {
-            this.abs = abs;
-            this.env = env;
-        }
-
-        @Override public String toString() {
-            return CodeGen.scheme(abs);
-        }
-    }
-
-
-    /* ------------------ Interpreter ---------------------- */
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    /* ----------------------- Env ---------------------- */
     @SuppressWarnings("MapOrSetKeyShouldOverrideHashCodeEquals")
     class Env<V> {
         final Map<Sym, V> env = new LinkedHashMap<>();
@@ -264,46 +162,7 @@ public interface λ {
         }
     }
 
-    interface Eval<From, To> {
-        To eval(From s, Env<To> env);
-    }
-
-    // 这个解释器的环境其实没什么卵用, 编译器已经把自由变量干掉了, 也不需要环境, 仅仅在做代换处理
-    class Interp implements Visitor<Val, Env<Val>>, Eval<Expr, Val> {
-        final static Eval<Expr, Val> self = new Interp();
-
-        @Override public Val visit(Sym s, Env<Val> env) {
-            return env.lookup(s);
-        }
-        @Override public Val visit(App s, Env<Val> env) {
-            return apply(s, env);
-        }
-        @Override public Val visit(Abs s, Env<Val> env) {
-            return new Closure(s, env);
-        }
-
-        // eval - apply
-
-        @Override
-        public Val eval(Expr s, Env<Val> env) {
-            return visit(s, env);
-        }
-
-        Val apply(App app, Env<Val> env) {
-            Val val = eval(app.abs, env);
-            if (val instanceof Closure) {
-                Closure closure = ((Closure) val);
-                Env<Val> subEnv = new Env<>(closure.env);
-                Val arg = eval(app.arg, env);
-                subEnv.put(closure.abs.param, arg);
-                return eval(closure.abs.body, subEnv);
-            } else {
-                return val;
-            }
-        }
-    }
-
-
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     /* ---------------------- Parser ------------------------ */
     class Parser {
         static ScriptEngine JS = new ScriptEngineManager().getEngineByName("javascript");
@@ -319,29 +178,19 @@ public interface λ {
     }
 
 
-
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     /* --------------------  Compiler ----------------------- */
     @SuppressWarnings("rawtypes")
-    class Compiler implements Eval<Object, Expr> {
-        final static Compiler self = new Compiler();
+    class Compiler {
 
         static Object Y = parse(S_Y);
         static Object NIL = parse(S_NIL);
+        final static Visitor<Expr, Env<Expr>> expander = new Expander();
 
-        @Override
-        public Expr eval(Object s, Env<Expr> env) {
-            return compile(s, env);
-        }
-
-        static class Expander implements Visitor<Expr, Env<Expr>>, Eval<Expr, Expr> {
-            final static Eval<Expr, Expr> self = new Expander();
-
-            @Override public Expr visit(Sym s, Env<Expr> env) {
-                return env.lookup(s);
-            }
-            @Override public Expr visit(App s, Env<Expr> env) {
-                return new App(visit(s.abs, env), visit(s.arg, env));
-            }
+        // expander 负责把 free var 都替换掉, 保证生成结果 expr 都是 closed term
+        static class Expander implements Visitor<Expr, Env<Expr>> {
+            @Override public Expr visit(Sym s, Env<Expr> env) { return env.lookup(s); }
+            @Override public Expr visit(App s, Env<Expr> env) { return new App(visit(s.abs, env), visit(s.arg, env)); }
             @Override public Expr visit(Abs s, Env<Expr> env) {
                 // close term, 干掉 free var
                 Env<Expr> subEnv = new Env<>(env);
@@ -349,14 +198,10 @@ public interface λ {
                 Expr body = visit(s.body, subEnv);
                 return new Abs(s.param, body);
             }
-
-            @Override public Expr eval(Expr s, Env<Expr> env) {
-                return visit(s, env);
-            }
         }
 
         static Expr compile(Object s, Env<Expr> env) {
-            return expander().eval(compile1(s), env);
+            return expander.visit(compile1(s), env);
         }
 
         // 注意: 不能直接替换代码, 一个case (λ (+) (+ 0 0))
@@ -538,20 +383,37 @@ public interface λ {
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    /* --------------------  FFI ----------------------- */
+    interface UnChurchification<T> {
 
+        T unChurchify(F churchEncoded);
 
-    interface FFI {
-
-        interface F extends Function<F, F> { }
-
-        class Compiler implements Visitor<F, Env<F>>, Eval<Expr, F> {
-            final static Eval<Expr, F> self = new Compiler();
-            @Override public F visit(Sym s, Env<F> env) {
-                return env.lookup(s);
+        interface F extends Function<F, F> {
+            default int nat() {
+                return natify(this);
             }
-            @Override public F visit(App s, Env<F> env) {
-                return visit(s.abs, env).apply(visit(s.arg, env));
+            default boolean bool() {
+                return boolify(this);
             }
+//            default String string(F churchBoolean)  {
+//
+//            }
+            default Pair<Integer> natList () {
+                return listify(UnChurchification::natify, this);
+            }
+            default Pair<Boolean> boolList() {
+                return listify(UnChurchification::boolify, this);
+            }
+//            default Pair<Boolean> stringList(F churchList) {
+//
+//            }
+        }
+
+        CodeGen<F, Env<F>> compiler = new Compiler();
+
+        class Compiler implements CodeGen<F, Env<F>> {
+            @Override public F visit(Sym s, Env<F> env) { return env.lookup(s); }
+            @Override public F visit(App s, Env<F> env) { return visit(s.abs, env).apply(visit(s.arg, env)); }
             @Override public F visit(Abs s, Env<F> env) {
                 return arg -> {
                     Env<F> subEnv = new Env<>(env);
@@ -559,79 +421,14 @@ public interface λ {
                     return visit(s.body, subEnv);
                 };
             }
-            @Override public F eval(Expr s, Env<F> env) {
-                return visit(s, env);
-            }
         }
 
-        class Pair<T> implements Val {
-            final T car;
-            final Pair<T> cdr;
-
-            Pair(T car, Pair<T> cdr) {
-                this.car = car;
-                this.cdr = cdr;
-            }
-
-            @SafeVarargs
-            static <T> Pair<T> of(T ...els) {
-                int sz = els.length;
-                if (sz == 0) {
-                    return new Pair<>(null, null);
-                } else {
-                    Pair<T> pair = new Pair<>(null, null);
-                    for (int i = sz - 1; i >= 0; i--) {
-                        pair = new Pair<>(els[i], pair);
-                    }
-                    return pair;
-                }
-            }
-
-            @Override
-            public boolean equals(Object o) {
-                if (this == o) return true;
-                if (o == null || getClass() != o.getClass()) return false;
-                return Objects.equals(car, ((Pair<?>) o).car) && Objects.equals(cdr, ((Pair<?>) o).cdr);
-            }
-
-            @Override
-            public int hashCode() {
-                return Objects.hash(car, cdr);
-            }
-
-            @Override public String toString() {
-                if (car == null && cdr == null) {
-                    return "nil";
-                } else {
-                    return "(" + car + " " + cdr + ")";
-                }
-            }
-        }
-
-        class VF<T> implements F {
-            final T val;
-            VF(T val) {
-                this.val = val;
-            }
-            @Override public F apply(F f) {
-                return nil.apply(f);
-            }
-        }
 
         F nil = f -> f;
         F succ = n -> f -> z -> f.apply(n.apply(f.apply(z))); // (λ (n) (λ (f) (λ (z) (f (n (f z))))))
         F zero = f -> null;
         F True = f -> f;
         F False = f -> f;
-
-        Eval<F, Integer>        natifier    = (f, env) -> natify(f);
-        Eval<F, Boolean>        boolifier   = (f, env) -> boolify(f);
-        Eval<F, Pair<Integer>>  natListify  = (f, env) -> natListify(f);
-        Eval<F, Pair<Boolean>>  boolListify = (f, env) -> boolListify(f);
-
-        interface UnChurchification<T> {
-            T unChurchify(F churchEncoded);
-        }
 
         static int natify(F churchNumeral) {
             F f = churchNumeral.apply(succ).apply(zero);
@@ -654,7 +451,17 @@ public interface λ {
             }
         }
 
+
         static <T> Pair<T> listify(UnChurchification<T> unChurch, F churchList) {
+            class VF<T1> implements F {
+                final T1 val;
+                VF(T1 val) {
+                    this.val = val;
+                }
+                @Override public F apply(F f) {
+                    return nil.apply(f);
+                }
+            }
             F onCons = car -> cdr -> new VF<>(new Pair<>(unChurch.unChurchify(car), listify(unChurch, cdr)));
             F onNil = nil -> new VF<>(new Pair<>(null, null));
             //noinspection unchecked
@@ -662,14 +469,122 @@ public interface λ {
             return vf.val;
         }
 
-        static Pair<Integer> natListify(F churchList) {
-            return listify(FFI::natify, churchList);
-        }
+        class Pair<T> {
+            final T car;
+            final Pair<T> cdr;
 
-        static Pair<Boolean> boolListify(F churchList) {
-            return listify(FFI::boolify, churchList);
+            Pair(T car, Pair<T> cdr) {
+                this.car = car;
+                this.cdr = cdr;
+            }
+
+            @SafeVarargs
+            static <T> Pair<T> of(T ...els) {
+                int sz = els.length;
+                if (sz == 0) {
+                    return new Pair<>(null, null);
+                } else {
+                    Pair<T> pair = new Pair<>(null, null);
+                    for (int i = sz - 1; i >= 0; i--) {
+                        pair = new Pair<>(els[i], pair);
+                    }
+                    return pair;
+                }
+            }
+
+            @Override public boolean equals(Object o) {
+                if (this == o) return true;
+                if (o == null || getClass() != o.getClass()) return false;
+                return Objects.equals(car, ((Pair<?>) o).car) && Objects.equals(cdr, ((Pair<?>) o).cdr);
+            }
+
+            @Override public int hashCode() {
+                return Objects.hash(car, cdr);
+            }
+
+            @Override public String toString() {
+                if (car == null && cdr == null) {
+                    return "nil";
+                } else {
+                    return "(" + car + " " + cdr + ")";
+                }
+            }
         }
     }
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+    interface CodeGen<V, C> extends Visitor<V, C> {
+
+        CodeGen<F, Env<F>> java = UnChurchification.compiler;
+
+        CodeGen<Expr, Void> expr = new CodeGen<Expr, Void>() {
+            @Override public Expr visit(Sym s, Void ctx) { return s; }
+            @Override public Expr visit(App s, Void ctx) { return s; }
+            @Override public Expr visit(Abs s, Void ctx) { return s; }
+        };
+
+        // natify : (+ n 1)(0)
+        // boolity: (λ () #t)(λ () #f)
+        CodeGen<String, Void> scheme = new CodeGen<String, Void>() {
+            @Override public String visit(Sym s, Void v) {
+                return s.name;
+            }
+            @Override public String visit(App s, Void v) {
+                return "(" + visit(s.abs, v) + " " + visit(s.arg, v) + ")";
+            }
+            @Override public String visit(Abs s, Void v) {
+                return "(" + LAMBDA + " (" + visit(s.param, v) + ") " + visit(s.body, v) + ")";
+            }
+        };
+
+        CodeGen<String, Void> json = new CodeGen<String, Void>() {
+            @Override public String visit(Sym s, Void v) {
+                return "'" + s.name + "'";
+            }
+            @Override public String visit(App s, Void v) {
+                return "[" + visit(s.abs, v) + ", " + visit(s.arg, v) + "]";
+            }
+            @Override public String visit(Abs s, Void v) {
+                return "['" + LAMBDA + "', [" + visit(s.param, v) + "], " + visit(s.body, v) + "]";
+            }
+        };
+
+        // natify : (n => n + 1)(0)
+        // boolify: (_ => true)(_ => false)
+        // (() => { let unchurchify = (churched) => churched(car => cdr => [car(n => n+1)(0), unchurchify(cdr)])(nil => null); return unchurchify })()(%s)
+        CodeGen<String, Void> js = new CodeGen<String, Void>() {
+            @Override public String visit(Sym s, Void v) {
+                return s.name;
+            }
+            @Override public String visit(App s, Void v) {
+                if (s.abs instanceof Sym) {
+                    return visit(s.abs, v) + "(" + visit(s.arg, v) + ")";
+                } else {
+                    return "(" + visit(s.abs, v) + ")" + "(" + visit(s.arg, v) + ")";
+                }
+            }
+            @Override public String visit(Abs s, Void v) {
+                return "(" + visit(s.param, v) + " => " + visit(s.body, v) + ")";
+            }
+        };
+
+        // natify : (lambda n: n + 1)(0)
+        // boolify: (lambda _: true)(lambda _: false)
+        CodeGen<String, Void> py = new CodeGen<String, Void>() {
+            @Override public String visit(Sym s, Void v) {
+                return s.name;
+            }
+            @Override public String visit(App s, Void v) {
+                return "((" + visit(s.abs, v) + ")(" + visit(s.arg, v) + "))";
+            }
+            @Override public String visit(Abs s, Void v) {
+                return "(lambda " + s.param.name + ": (" + visit(s.body, v) + "))";
+            }
+        };
+    }
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
     interface Names {
         String VOID = "nothing";
@@ -688,6 +603,7 @@ public interface λ {
         String SUM = "+";
         String SUB = "-";
         String MUL = "*";
+        String POW = "^";
         String EQ = "=";
 
         // Lists
@@ -706,6 +622,7 @@ public interface λ {
     interface Primitives {
         // 这里不用定义成单参的函数, compile1 会做 curry 处理
 
+        // https://www.slideshare.net/yinwang0/reinventing-the-ycombinator
         String S_Y = "[['λ', ['y'], ['λ', ['F'], ['F', ['λ', ['x'], [[['y', 'y'], 'F'], 'x']]]]],\n" +
                      " ['λ', ['y'], ['λ', ['F'], ['F', ['λ', ['x'], [[['y', 'y'], 'F'], 'x']]]]]]";
 
@@ -738,10 +655,15 @@ public interface λ {
         // (λ (n m f z) (m (n f) z))
         String S_MUL = "['λ', ['n', 'm', 'f', 'z'], ['m', ['n', 'f'], 'z']]";
 
+        String S_ONE = "['λ', ['f', 'z'], ['f', 'z']]";
+        String S_POW = "['λ', ['m', 'n'], [['n', [" + S_MUL + ", 'm']], " + S_ONE + "]]";
+
         // (λ (n) (λ (f) (λ (z) (((n (λ (g) (λ (h) (h (g f))))) (λ (u) z)) (λ (u) u)))))
         // (λ (n f z) (n   (λ (g h) (h (g f)))    (λ (u) z)    (λ (u) u)  ))
         String S_PRED = "['λ', ['n', 'f', 'z'],  ['n',   ['λ', ['g', 'h'], ['h', ['g', 'f']]],   ['λ', ['u'], 'z'],    ['λ', ['u'], 'u']  ]]";
 
+        // 注意: 这路程针对自然数的减法变种，称作饱和减法 （Monus，由 minus 修改而来）
+        // 由于没有负的自然数，如果被减数比减数小，我们就将结果取零。
         // (λ (n) (λ (m) ((m ,S_PRED) n)))
         // (λ (n m) (m ,S_PRED n))
         String S_SUB = "['λ', ['n', 'm'], ['m', " + S_PRED + ", 'n']]";
@@ -772,4 +694,49 @@ public interface λ {
         // (λ (list) (list (λ (_1 _2) ,S_FALSE) (λ (_) ,S_TRUE)))
         String S_IS_NULL = "['λ', ['list'], ['list', ['λ', ['_1', '_2'], '" + FALSE + "'], ['λ', ['_'], '" + TRUE + "']]]";
     }
+
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    /* ----------------------- Value & Interpreter ---------------------- */
+    // 演示解释器写法, 没什么用
+    // 这个解释器的环境其实没什么卵用, 编译器已经把自由变量干掉了, 也不需要环境, 仅仅在做代换处理
+
+    /*
+    interface Val { }
+    class Closure implements Val {
+        final Abs abs;
+        final Env<Val> env;
+
+        Closure(Abs abs, Env<Val> env) {
+            this.abs = abs;
+            this.env = env;
+        }
+
+        @Override public String toString() {
+            return CodeGen.scheme(abs);
+        }
+    }
+
+    class Interp implements Visitor<Val, Env<Val>> {
+        @Override public Val visit(Sym s, Env<Val> env) { return env.lookup(s);         }
+        @Override public Val visit(App s, Env<Val> env) { return apply(s, env);         }
+        @Override public Val visit(Abs s, Env<Val> env) { return new Closure(s, env);   }
+
+        // eval $ apply
+        public Val eval(Expr s, Env<Val> env) { return visit(s, env); }
+
+        Val apply(App app, Env<Val> env) {
+            Val val = eval(app.abs, env);
+            if (val instanceof Closure) {
+                Closure closure = ((Closure) val);
+                Env<Val> subEnv = new Env<>(closure.env);
+                Val arg = eval(app.arg, env);
+                subEnv.put(closure.abs.param, arg);
+                return eval(closure.abs.body, subEnv);
+            } else {
+                return val;
+            }
+        }
+    }
+     */
 }

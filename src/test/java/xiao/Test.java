@@ -1,61 +1,70 @@
 package xiao;
 
-import xiao.EA;
-import xiao.λ.Env;
+import xiao.λ.*;
+import xiao.λ.UnChurchification.Pair;
 
-import static java.lang.String.*;
-import static xiao.CodeGen.*;
+import java.util.Arrays;
+import java.util.List;
+
+import static java.lang.String.format;
+import static xiao.λ.CodeGen.*;
 import static xiao.λ.*;
-import static xiao.λ.FFI.*;
 import static xiao.λ.Names.LAMBDA;
 import static xiao.λ.Primitives.*;
+import static xiao.λ.UnChurchification.Pair;
 
 /**
  * @author chuxiaofeng
  */
-public interface Test {
+public class Test {
 
-    static void exit() {
+    void exit() {
         System.exit(0);
     }
-    static Closure ec(String s) {
-        return λ.eval(compile(s));
-    }
 
-    static FFI.F cc(String s) {
-        return λ.compile(λ.compile(s));
-    }
-
+    String jsCode = "";
 
     // natify eval
-    static int ne(String s) {
-        int i = λ.natify(cc(s));
-        System.out.printf("console.assert(%d === ((%s)(n => n + 1)(0)), `%s`)\n\n", i, js(compile(s)), s);
+    int ne(String s) {
+        int i = compile(s, java).nat();
+        jsCode += format("console.assert(%d === ((%s)(n => n + 1)(0)), `%s`)\n\n", i, compile(s, js), s);
         return i;
     }
     // boolify eval
-    static boolean be(String s) {
-        boolean b = λ.boolify(cc(s));
-        System.out.printf("console.assert((%s)(_ => true)(_ => false), `%s`)\n\n", js(compile(s)), s);
+    boolean be(String s) {
+        boolean b = compile(s, java).bool();
+        jsCode += format("console.assert((%s)(_ => true)(_ => false), `%s`)\n\n", compile(s, js), s);
         return b;
     }
     // listify natify eval
-    static FFI.Pair<Integer> lne(String s) {
-        Pair<Integer> lst = λ.natListify(cc(s));
-        System.out.printf("console.assert(JSON.stringify([3, [4, null]]) === JSON.stringify((() => { let unchurchify = (churched) => churched(car => cdr => [car(n => n+1)(0), unchurchify(cdr)])(nil => null); return unchurchify })()(%s)), %s)\n\n", js(compile(s)), s);
+    Pair<Integer> lne(String s) {
+        Pair<Integer> lst = compile(s, java).natList();
+        jsCode += format("console.assert(JSON.stringify([3, [4, null]]) === JSON.stringify((() => { let unchurchify = (churched) => churched(car => cdr => [car(n => n+1)(0), unchurchify(cdr)])(nil => null); return unchurchify })()(%s)), %s)\n\n", compile(s, js), s);
         return lst;
     }
     // listify boolify eval
-    static Pair<Boolean> lbe(String s) {
-        return λ.boolListify(cc(s));
+    Pair<Boolean> lbe(String s) {
+        return compile(s, java).boolList();
     }
-    static String num(int n) {
-        return json(compile(n + ""));
+    String num(int n) {
+        return compile(n + "", json);
+    }
+
+    String cons(Object ...args) {
+        return cons(Arrays.asList(args));
+    }
+    String cons(List els) {
+        if (els.isEmpty()) {
+            return "['quote', []]";
+        } else {
+            return "['cons', " + els.get(0) + ", " + cons(els.subList(1, els.size())) + "]";
+        }
     }
 
 
-    static void test() {
 
+    @SuppressWarnings("AssertWithSideEffects")
+    void test() {
         String not = "[['λ', ['not'], ['not', %s]], ['λ', ['cond'], ['if', 'cond', '#f', '#t']]]";
 
         assert 0 == ne(format("[%s, %s]", S_PRED, num(0)));
@@ -80,6 +89,22 @@ public interface Test {
         assert 0 == ne("['*', 2, 0]");
         assert 12 == ne("['*', 3, 4]");
 
+        assert 1 == ne("['^', 0, 0]");
+        assert 0 == ne("['^', 0, 2]");
+        assert 1 == ne("['^', 2, 0]");
+        assert 8 == ne("['^', 2, 3]");
+
+
+        String le = "['letrec', [['less_or_eq', ['λ', ['m', 'n'], ['zero?', ['-', 'm', 'n']]]]], ['less_or_eq', %d, %d]]";
+        assert be(format(le, 0, 0));
+        assert be(format(le, 0, 1));
+        assert be(format(le, 3, 4));
+        assert be(format(le, 3, 3));
+        assert be(format(not, format(le, 1, 0)));
+        assert be(format(not, format(le, 4, 3)));
+
+
+
         assert 7 == ne("['let', [['x', 3], ['y', 4]], ['+', 3, 4]]");
 
         assert be("['=', 3, 3]");
@@ -100,45 +125,59 @@ public interface Test {
         assert be(format(not, "['or', '#f', '#f']"));
 
         assert 120 == ne(fact);
+
+        assert 3 == ne(format(size, cons(3, 4, 5)));
+        assert 2 == ne(format(size, cons(3, 4)));
+        assert 0 == ne(format(size, cons()));
+
+        System.out.println(jsCode);
+        jsCode = "";
     }
 
-    static void test1() {
-        assert "(λ (+) ((+ (λ (f) (λ (z) z))) (λ (f) (λ (z) z))))" .equals(scheme(compile("['λ', ['+'],  ['+', 0, 0]]")));
+    // (letrec [(f (λ (n) (if (= n 0) 1 (* n (f (- n 1))))))] (f 5))
+    final String fact =
+            "['letrec', [\n" +
+                    "            ['f', \n" +
+                    "              ['λ', ['n'],\n" +
+                    "                  ['if', ['=', 'n', 0],\n" +
+                    "                        1,\n" +
+                    "                        ['*', 'n', ['f', ['-', 'n', 1]]]]]]],\n" +
+                    " ['f', 5]]";
+    final String size = "['letrec', [\n" +
+            "  ['size', ['λ', ['s'], ['if', ['null?', 's'], 0, ['+', 1, ['size', ['cdr', 's']]]]]]],\n" +
+            "  ['size', %s]]";
+
+
+
+    void tmp() {
+        assert "(λ (+) ((+ (λ (f) (λ (z) z))) (λ (f) (λ (z) z))))" .equals(compile("['λ', ['+'],  ['+', 0, 0]]", scheme));
 
         {
-            Env<Expr> env = compilerEnv();
+            Env<Expr> env = bootEnv();
             env.put(Sym.of("x"), compile("'#t'"));
             env.put(Sym.of("y"), compile("'#f'"));
             env.put(Sym.of("z"), compile("'#t'"));
             env.put(Sym.of("b"), compile("'#t'"));
             env.put(Sym.of("c"), compile("'#t'"));
-            System.err.println(scheme(compile("['if', ['and', 'x', ['or', 'y', 'z']], 'b', 'c']", env)));
+
+            System.err.println(compile("['if', ['and', 'x', ['or', 'y', 'z']], 'b', 'c']", env, CodeGen.scheme, null));
         }
+
+        System.err.println(compile(fact, js));
+        System.err.println(compile(fact, py));
+        System.err.println(compile(fact, json));
+        System.err.println(compile(fact, scheme));
+
     }
 
-    static void testPrinter() {
-        Expr s = compile(fact);
-        System.err.println(js(s));
-        System.err.println(py(s));
-        System.err.println(json(s));
-        System.err.println(scheme(s));
-    }
-
-    // (letrec [(f (λ (n) (if (= n 0) 1 (* n (f (- n 1))))))] (f 5))
-    String fact =
-            "['letrec', [\n" +
-                    "            ['f', \n" +
-                    "              ['" + LAMBDA + "', ['n'],\n" +
-                    "                  ['if', ['=', 'n', 0],\n" +
-                    "                        1,\n" +
-                    "                        ['*', 'n', ['f', ['-', 'n', 1]]]]]]],\n" +
-                    " ['f', 5]]";
 
 
-    static void main(String[] args) {
+    public static void main(String[] args) {
         EA.main(Test.class, args, n -> n.startsWith(Test.class.getPackage().getName()));
-        test();
-        test1();
-        testPrinter();
+        Test test = new Test();
+        test.test();
+        test.tmp();
+
+        System.out.println(compile("['^', 2, 3]", java).nat());
     }
 }
