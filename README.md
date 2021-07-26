@@ -1,6 +1,4 @@
-# λ
-
-> Source to Source Lambda Calculus Compiler
+# Source to Source λ Calculus Compiler
 
 - 代码分为几块:
      - Parser : 把代码 (语法用 json array 来表达 s-expr) 转换成 java list 的 s-expr
