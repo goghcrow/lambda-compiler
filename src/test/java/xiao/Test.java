@@ -3,6 +3,7 @@ package xiao;
 import xiao.λ.*;
 import xiao.λ.UnChurchification.Pair;
 
+import javax.script.ScriptException;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.URL;
@@ -10,6 +11,7 @@ import java.net.URLClassLoader;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.function.Function;
 import java.util.function.Predicate;
 
 import static java.lang.String.format;
@@ -23,7 +25,7 @@ import static xiao.λ.*;
 @SuppressWarnings("SameParameterValue")
 public class Test {
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws ScriptException {
         runMainWithEnableAssert(Test.class, args, n -> n.startsWith(Test.class.getPackage().getName()));
         Test test = new Test();
         test.hello();
@@ -44,6 +46,7 @@ public class Test {
 
     void assertEquals(String expected, String s) {
         assert expected.equals(compile(s, java).string());
+        // console.assert(`%s`
         jsCode += format("console.assert(`%s`=== (() => { let unchurchify = (churched) => churched(car => cdr => String.fromCharCode(car(n => n+1)(0)) + unchurchify(cdr))(nil => ''); return unchurchify })()(%s), %s)\n\n", expected, compile(s, js), s);
     }
 
@@ -172,6 +175,22 @@ public class Test {
     }
 
     void fizzbuzz() {
+/*
+(letrec ((fizzbuzz (λ (i s)
+   (if (<= i 100)
+       (if (= (modulo i 15) 0)
+           (fizzbuzz (+ i 1) (cons "FizzBuzz" s))
+           (if (= (modulo i 3) 0)
+               (fizzbuzz (+ i 1) (cons "Fizz" s))
+               (if (= (modulo i 5) 0)
+                   (fizzbuzz (+ i 1) (cons "Buzz" s))
+                   (fizzbuzz (+ i 1) (cons (cons i (quote ())) s))
+                   )
+               )
+           )
+       s))))
+      (fizzbuzz 1 (quote ())))
+ */
         String fizzbuzz = "['letrec', [['fizzbuzz', ['λ', ['i', 's'],\n" +
                 "   ['if', ['<=', 'i', 100],\n" +
                 "       ['if', ['=', ['%', 'i', 15], 0],\n" +

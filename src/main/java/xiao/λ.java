@@ -6,7 +6,6 @@ import javax.script.ScriptException;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.function.Function;
-import java.util.stream.Collectors;
 
 import static xiao.λ.Compiler.compile1;
 import static xiao.λ.Names.*;
@@ -178,12 +177,12 @@ public interface λ {
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     /* ---------------------- Parser ------------------------ */
     class Parser {
-        static ScriptEngine JS = new ScriptEngineManager().getEngineByName("javascript");
+        static ScriptEngine engine = new ScriptEngineManager().getEngineByName("javascript");
 
         // String ->  Map | List | String | Integer
         public static Object parse(String s) {
             try {
-                return JS.eval("Java.asJSONCompatible(" + s + ")");
+                return engine.eval("Java.asJSONCompatible(" + s + ")");
             } catch (ScriptException e) {
                 throw new RuntimeException(e);
             }
