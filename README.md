@@ -110,7 +110,7 @@ const unchurchifyList = (unchurchification, churched) => churched(car => cdr => 
 ### Hello World!
 
 ```java
-String hello = "'\"Hello World!\"'";
+String hello = "\"Hello World!\"";
 System.out.println(λ.compile(hello, CodeGen.js));
 System.out.println(λ.compile(hello, CodeGen.java).string()); // Hello World!
 ```
@@ -125,10 +125,10 @@ console.log(unchurchifyString( ... )) // Hello World!
 ### Fact
 
 ```java
-String fact5 =
-    "['letrec', " +
-        "[['fact', ['λ', ['n'], ['if', ['=', 'n', 0], 1, ['*', 'n', ['fact', ['-', 'n', 1]]]]]]]," +
-        " ['fact', 5]]";
+String fact5 = "(letrec (" +
+                "               (fact (λ (n) " +
+                "                   (if (= n 0) 1 (* n (fact (- n 1))))))) " +
+                "       (fact 5))";
 System.out.println(λ.compile(fact5, CodeGen.js));
 System.out.println(λ.compile(fact5, CodeGen.java).nat()); // 120
 ```
@@ -145,36 +145,24 @@ console.log(unchurchifyNat( ... )) // 120
 
 code
 ```java
-/*
-['letrec', [['fizzbuzz', ['λ', ['i', 's'],
-   ['if', ['<=', 'i', 100],
-       ['if', ['=', ['%', 'i', 15], 0],
-           ['fizzbuzz', ['+', 'i', 1], ['cons', '"FizzBuzz"', 's']],
-           ['if', ['=', ['%', 'i', 3], 0],
-               ['fizzbuzz', ['+', 'i', 1], ['cons', '"Fizz"', 's']],
-               ['if', ['=', ['%', 'i', 5], 0],
-                   ['fizzbuzz', ['+', 'i', 1], ['cons', '"Buzz"', 's']],
-                   ['fizzbuzz', ['+', 'i', 1], ['cons', ['if', ['<', 'i', 10],
-                                                               ['cons', ['+', 48, 'i'], ['quote', []]],
-                                                               ['cons', ['+', 48, ['/', 'i', 10]], ['cons', ['+', 48, ['%', 'i', 10]], ['quote', []]]]],                                                       's']]]]],
-       's']]]],
-      ['fizzbuzz', 1, ['quote', []]]]
-*/
-String fizzbuzz = "['letrec', [['fizzbuzz', ['λ', ['i', 's'],\n" +
-        "   ['if', ['<=', 'i', 100],\n" +
-        "       ['if', ['=', ['%', 'i', 15], 0],\n" +
-        "           ['fizzbuzz', ['+', 'i', 1], ['cons', '\"FizzBuzz\"', 's']],\n" +
-        "           ['if', ['=', ['%', 'i', 3], 0],\n" +
-        "               ['fizzbuzz', ['+', 'i', 1], ['cons', '\"Fizz\"', 's']],\n" +
-        "               ['if', ['=', ['%', 'i', 5], 0],\n" +
-        "                   ['fizzbuzz', ['+', 'i', 1], ['cons', '\"Buzz\"', 's']],\n" +
-        "                   ['fizzbuzz', ['+', 'i', 1], ['cons', \n" +
-        "                                                       ['if', ['<', 'i', 10], \n" +
-        "                                                               ['cons', ['+', 48, 'i'], ['quote', []]],\n" +
-        "                                                               ['cons', ['+', 48, ['/', 'i', 10]], ['cons', ['+', 48, ['%', 'i', 10]], ['quote', []]]]],\n" +
-        "                                                       's']]]]],\n" +
-        "       's']]]],\n" +
-        "      ['fizzbuzz', 1, ['quote', []]]]\n";
+String fizzbuzz = "(letrec ((fizzbuzz (λ (i s)\n" +
+        "   (if (<= i 100)\n" +
+        "       (if (= (% i 15) 0)\n" +
+        "           (fizzbuzz (+ i 1) (cons \"FizzBuzz\" s))\n" +
+        "           (if (= (% i 3) 0)\n" +
+        "               (fizzbuzz (+ i 1) (cons \"Fizz\" s))\n" +
+        "               (if (= (% i 5) 0)\n" +
+        "                   (fizzbuzz (+ i 1) (cons \"Buzz\" s))\n" +
+        "                   (fizzbuzz (+ i 1) (cons \n" +
+        "                                           (if (< i 10) \n" +
+        "                                                   (cons (+ 48 i) (quote ())) \n" +
+        "                                                   (cons (+ 48 (/ i 10)) (cons (+ 48 (% i 10)) (quote ())))) \n" +
+        "                                           s))\n" +
+        "                   )\n" +
+        "               )\n" +
+        "           )\n" +
+        "       s))))\n" +
+        "      (fizzbuzz 1 (quote ())))";
 System.out.println(λ.compile(fizzbuzz, CodeGen.js));
 
 Pair<String> s = λ.compile(fizzbuzz, CodeGen.java).list(UnChurchification::stringify);

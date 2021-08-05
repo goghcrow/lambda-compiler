@@ -3,7 +3,6 @@ package xiao;
 import xiao.λ.*;
 import xiao.λ.UnChurchification.Pair;
 
-import javax.script.ScriptException;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.URL;
@@ -11,11 +10,13 @@ import java.net.URLClassLoader;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
-import java.util.function.Function;
 import java.util.function.Predicate;
 
 import static java.lang.String.format;
+import static java.util.stream.Collectors.toList;
 import static xiao.λ.CodeGen.*;
+import static xiao.λ.Expr.*;
+import static xiao.λ.Parser.Node.*;
 import static xiao.λ.Primitives.*;
 import static xiao.λ.*;
 
@@ -25,7 +26,7 @@ import static xiao.λ.*;
 @SuppressWarnings("SameParameterValue")
 public class Test {
 
-    public static void main(String[] args) throws ScriptException {
+    public static void main(String[] args) {
         runMainWithEnableAssert(Test.class, args, n -> n.startsWith(Test.class.getPackage().getName()));
         Test test = new Test();
         test.hello();
@@ -33,6 +34,7 @@ public class Test {
         test.fizzbuzz();
         test.fact();
         test.size();
+        test.tmp();
         System.out.println(test.jsCode);
     }
 
@@ -41,7 +43,7 @@ public class Test {
 
     void assertEquals(Pair<Integer> expected, String jsArr, String s) {
         assert expected.equals(compile(s, java).list(UnChurchification::natify));
-        jsCode += format("console.assert(JSON.stringify(%s) === JSON.stringify((() => { let unchurchify = (churched) => churched(car => cdr => [car(n => n+1)(0), unchurchify(cdr)])(nil => null); return unchurchify })()(%s)), %s)\n\n", jsArr, compile(s, js), s);
+        jsCode += format("console.assert(JSON.stringify(%s) === JSON.stringify((() => { let unchurchify = (churched) => churched(car => cdr => [car(n => n+1)(0), unchurchify(cdr)])(nil => null); return unchurchify })()(%s)), `%s`)\n\n", jsArr, compile(s, js), s);
     }
 
     void assertEquals(String expected, String s) {
@@ -67,170 +69,154 @@ public class Test {
 
 
     void hello() {
-        assertEquals("Hello World!", "'\"Hello World!\"'");
+        assertEquals("Hello World!", "\"Hello World!\"");
     }
 
     void test() {
-        assertEquals(0, format("[%s, %s]", S_PRED, num(0)));
-        assertEquals(8, format("[%s, %s]", S_PRED, num(9)));
-        assertEquals(9, format("[%s, %s]", S_SUCC, num(8)));
+        assertEquals(0, format("(%s %s)", S_PRED, num(0)));
+        assertEquals(8, format("(%s %s)", S_PRED, num(9)));
+        assertEquals(9, format("(%s %s)", S_SUCC, num(8)));
 
-        assertEquals(11, format("[%s, %s, %s]", S_SUM, num(5), num(6)));
-        assertEquals(0, format("[%s, %s, %s]", S_SUB, num(0), num(1)));
+        assertEquals(11, format("(%s %s %s)", S_SUM, num(5), num(6)));
+        assertEquals(0, format("(%s %s %s)", S_SUB, num(0), num(1)));
 
-        assertTrue("['=', 0, 0]");
-        assertTrue("['=', 1, 1]");
-        assertTrue("['=', 2, 2]");
+        assertTrue("(= 0 0)");
+        assertTrue("(= 1 1)");
+        assertTrue("(= 2 2)");
 
-        assertTrue("['!=', 1, 0]");
-        assertTrue("['!=', 1, 2]");
+        assertTrue("(!= 1 0)");
+        assertTrue("(!= 1 2)");
 
-        assertEquals(0, "['+', 0, 0]");
-        assertEquals(1, "['+', 0, 1]");
-        assertEquals(1, "['+', 1, 0]");
-        assertEquals(7, "['+', 3, 4]");
+        assertEquals(0, "(+ 0 0)");
+        assertEquals(1, "(+ 0 1)");
+        assertEquals(1, "(+ 1 0)");
+        assertEquals(7, "(+ 3 4)");
 
-        assertEquals(0, "['-', 0, 0]");
-        assertEquals(0, "['-', 0, 1]");
-        assertEquals(2, "['-', 3, 1]");
-        assertEquals(1, "['-', 3, 2]");
+        assertEquals(0, "(- 0 0)");
+        assertEquals(0, "(- 0 1)");
+        assertEquals(2, "(- 3 1)");
+        assertEquals(1, "(- 3 2)");
 
-        assertEquals(0, "['*', 0, 0]");
-        assertEquals(0, "['*', 0, 2]");
-        assertEquals(0, "['*', 2, 0]");
-        assertEquals(12, "['*', 3, 4]");
+        assertEquals(0, "(* 0 0)");
+        assertEquals(0, "(* 0 2)");
+        assertEquals(0, "(* 2 0)");
+        assertEquals(12, "(* 3 4)");
 
-        // assertEquals(0, "['/', 1, 0]"); // ERROR: stackoverflow
-        // assertEquals(0, "['/', 0, 0]"); // ERROR: stackoverflow
-        assertEquals(0, "['/', 0, 2]");
-        assertEquals(0, "['/', 3, 4]");
-        assertEquals(3, "['/', 3, 1]");
-        assertEquals(1, "['/', 3, 2]");
-        assertEquals(1, "['/', 3, 3]");
+        // assertEquals(0, "(/ 1 0)"); // ERROR: stackoverflow
+        // assertEquals(0, "(/ 0 0)"); // ERROR: stackoverflow
+        assertEquals(0, "(/ 0 2)");
+        assertEquals(0, "(/ 3 4)");
+        assertEquals(3, "(/ 3 1)");
+        assertEquals(1, "(/ 3 2)");
+        assertEquals(1, "(/ 3 3)");
 
-        assertEquals(1, "['^', 0, 0]");
-        assertEquals(0, "['^', 0, 2]");
-        assertEquals(1, "['^', 2, 0]");
-        assertEquals(8, "['^', 2, 3]");
+        assertEquals(1, "(^ 0 0)");
+        assertEquals(0, "(^ 0 2)");
+        assertEquals(1, "(^ 2 0)");
+        assertEquals(8, "(^ 2 3)");
 
-        assertFalse("['not', '#t']");
-        assertTrue("['not', '#f']");
+        assertFalse("(not #t)");
+        assertTrue("(not #f)");
 
-        assertTrue("['<=', 0, 0]");
-        assertTrue("['<=', 0, 1]");
-        assertTrue("['<=', 3, 4]");
-        assertTrue("['<=', 3, 3]");
-        assertFalse("['<=', 1, 0]");
-        assertFalse("['<=', 4, 3]");
+        assertTrue("(<= 0 0)");
+        assertTrue("(<= 0 1)");
+        assertTrue("(<= 3 4)");
+        assertTrue("(<= 3 3)");
+        assertFalse("(<= 1 0)");
+        assertFalse("(<= 4 3)");
 
-        assertFalse("['>', 0, 0]");
-        assertFalse("['>', 0, 1]");
-        assertFalse("['>', 3, 4]");
-        assertFalse("['>', 3, 3]");
-        assertTrue("['>', 1, 0]");
-        assertTrue("['>', 4, 3]");
+        assertFalse("(> 0 0)");
+        assertFalse("(> 0 1)");
+        assertFalse("(> 3 4)");
+        assertFalse("(> 3 3)");
+        assertTrue("(> 1 0)");
+        assertTrue("(> 4 3)");
 
-        assertTrue("['>=', 0, 0]");
-        assertTrue("['>=', 1, 0]");
-        assertTrue("['>=', 4, 3]");
-        assertTrue("['>=', 3, 3]");
-        assertFalse("['>=', 0, 1]");
-        assertFalse("['>=', 3, 4]");
+        assertTrue("(>= 0 0)");
+        assertTrue("(>= 1 0)");
+        assertTrue("(>= 4 3)");
+        assertTrue("(>= 3 3)");
+        assertFalse("(>= 0 1)");
+        assertFalse("(>= 3 4)");
 
-        assertFalse("['<', 0, 0]");
-        assertFalse("['<', 1, 0]");
-        assertFalse("['<', 4, 3]");
-        assertFalse("['<', 3, 3]");
-        assertTrue("['<', 0, 1]");
-        assertTrue("['<', 3, 4]");
+        assertFalse("(< 0 0)");
+        assertFalse("(< 1 0)");
+        assertFalse("(< 4 3)");
+        assertFalse("(< 3 3)");
+        assertTrue("(< 0 1)");
+        assertTrue("(< 3 4)");
 
-        // assertEquals(0, "['%', 0, 0]"); // ERROR: stackoverflow
-        assertEquals(0, "['%', 0, 1]");
-        assertEquals(0, "['%', 0, 2]");
-        assertEquals(1, "['%', 1, 2]");
-        assertEquals(2, "['%', 2, 3]");
-        assertEquals(0, "['%', 4, 2]");
-        assertEquals(1, "['%', 4, 3]");
-        assertEquals(1, "['%', 10, 3]");
+        // assertEquals(0, "(% 0 0)"); // ERROR: stackoverflow
+        assertEquals(0, "(% 0 1)");
+        assertEquals(0, "(% 0 2)");
+        assertEquals(1, "(% 1 2)");
+        assertEquals(2, "(% 2 3)");
+        assertEquals(0, "(% 4 2)");
+        assertEquals(1, "(% 4 3)");
+        assertEquals(1, "(% 10 3)");
 
-        assertEquals(7, "['let', [['x', 3], ['y', 4]], ['+', 3, 4]]");
+        assertEquals(7, "(let ((x 3) (y 4)) (+ 3 4))");
 
-        assertTrue("['=', 3, 3]");
-        assertFalse("['=', 3, 4]");
+        assertTrue("(= 3 3)");
+        assertFalse("(= 3 4)");
 
-        assertEquals(Pair.of(3, 4), "[3, [4, null]]", "['cons', 3, ['cons', 4, ['quote', []]]]");
-        assertEquals(3, "['car', ['cons', 3, 4]]");
-        assertEquals(4, "['cdr', ['cons', 3, 4]]");
+        assertEquals(Pair.of(3, 4), "[3, [4, null]]", "(cons 3 (cons 4 (quote ())))");
+        assertEquals(3, "(car (cons 3 4))");
+        assertEquals(4, "(cdr (cons 3 4))");
 
-        assertFalse("['null?', ['cons', 3, 4]]");
-        assertTrue("['pair?', ['cons', 3, 4]]");
-        assertTrue("['null?', ['quote', []]]");
+        assertFalse("(null? (cons 3 4))");
+        assertTrue("(pair? (cons 3 4))");
+        assertTrue("(null? (quote ()))");
 
-        assertTrue("['or', '#t', '#f']");
-        assertTrue("['or', '#f', '#t']");
-        assertFalse("['or', '#f', '#f']");
+        assertTrue("(or #t #f)");
+        assertTrue("(or #f #t)");
+        assertFalse("(or #f #f)");
 
         // 验证替换不会把body的+ 无脑换了
-        assert "(λ (+) ((+ (λ (f) (λ (z) z))) (λ (f) (λ (z) z))))" .equals(compile("['λ', ['+'],  ['+', 0, 0]]", scheme));
+        assert "(λ (+) ((+ (λ (f) (λ (z) z))) (λ (f) (λ (z) z))))" .equals(compile("(λ (+)  (+ 0 0))", scheme));
     }
 
     void fizzbuzz() {
-/*
-(letrec ((fizzbuzz (λ (i s)
-   (if (<= i 100)
-       (if (= (modulo i 15) 0)
-           (fizzbuzz (+ i 1) (cons "FizzBuzz" s))
-           (if (= (modulo i 3) 0)
-               (fizzbuzz (+ i 1) (cons "Fizz" s))
-               (if (= (modulo i 5) 0)
-                   (fizzbuzz (+ i 1) (cons "Buzz" s))
-                   (fizzbuzz (+ i 1) (cons (cons i (quote ())) s))
-                   )
-               )
-           )
-       s))))
-      (fizzbuzz 1 (quote ())))
- */
-        String fizzbuzz = "['letrec', [['fizzbuzz', ['λ', ['i', 's'],\n" +
-                "   ['if', ['<=', 'i', 100],\n" +
-                "       ['if', ['=', ['%', 'i', 15], 0],\n" +
-                "           ['fizzbuzz', ['+', 'i', 1], ['cons', '\"FizzBuzz\"', 's']],\n" +
-                "           ['if', ['=', ['%', 'i', 3], 0],\n" +
-                "               ['fizzbuzz', ['+', 'i', 1], ['cons', '\"Fizz\"', 's']],\n" +
-                "               ['if', ['=', ['%', 'i', 5], 0],\n" +
-                "                   ['fizzbuzz', ['+', 'i', 1], ['cons', '\"Buzz\"', 's']],\n" +
-                "                   ['fizzbuzz', ['+', 'i', 1], ['cons', \n" +
-                "                                                       ['if', ['<', 'i', 10], \n" +
-                "                                                               ['cons', ['+', 48, 'i'], ['quote', []]],\n" +
-                "                                                               ['cons', ['+', 48, ['/', 'i', 10]], ['cons', ['+', 48, ['%', 'i', 10]], ['quote', []]]]],\n" +
-                "                                                       's']]]]],\n" +
-                "       's']]]],\n" +
-                "      ['fizzbuzz', 1, ['quote', []]]]\n";
+        String fizzbuzz = "(letrec ((fizzbuzz (λ (i s)\n" +
+                "   (if (<= i 100)\n" +
+                "       (if (= (% i 15) 0)\n" +
+                "           (fizzbuzz (+ i 1) (cons \"FizzBuzz\" s))\n" +
+                "           (if (= (% i 3) 0)\n" +
+                "               (fizzbuzz (+ i 1) (cons \"Fizz\" s))\n" +
+                "               (if (= (% i 5) 0)\n" +
+                "                   (fizzbuzz (+ i 1) (cons \"Buzz\" s))\n" +
+                "                   (fizzbuzz (+ i 1) (cons \n" +
+                "                                           (if (< i 10) \n" +
+                "                                                   (cons (+ 48 i) (quote ())) \n" +
+                "                                                   (cons (+ 48 (/ i 10)) (cons (+ 48 (% i 10)) (quote ())))) \n" +
+                "                                           s))\n" +
+                "                   )\n" +
+                "               )\n" +
+                "           )\n" +
+                "       s))))\n" +
+                "      (fizzbuzz 1 (quote ())))";
         Pair<String> s = compile(fizzbuzz, java).list(UnChurchification::stringify);
         List<String> lst = s.list();
         Collections.reverse(lst);
-        System.out.println(lst);
+        System.err.println(lst);
     }
 
 
     void fact() {
-        // (letrec [(f (λ (n) (if (= n 0) 1 (* n (f (- n 1))))))] (f 5))
-        String fact = "['letrec', " +
-                "[['fact', ['λ', ['n'], ['if', ['=', 'n', 0], 1, ['*', 'n', ['fact', ['-', 'n', 1]]]]]]]," +
-                " ['fact', 5]]";
+        String fact5 = "(letrec (" +
+                "               (fact (λ (n) " +
+                "                   (if (= n 0) 1 (* n (fact (- n 1))))))) " +
+                "       (fact 5))";
+        System.err.println(compile(fact5, js));
+        System.err.println(compile(fact5, py));
+        System.err.println(compile(fact5, json));
+        System.err.println(compile(fact5, scheme));
 
-//        System.err.println(compile(fact, js));
-//        System.err.println(compile(fact, py));
-//        System.err.println(compile(fact, json));
-//        System.err.println(compile(fact, scheme));
-
-        assertEquals(120, fact);
+        assertEquals(120, fact5);
     }
 
     void size() {
-        String size = "['letrec', " +
-                "[['size', ['λ', ['s'], ['if', ['null?', 's'], 0, ['+', 1, ['size', ['cdr', 's']]]]]]]," +
-                " ['size', %s]]";
+        String size = "(letrec ((size (λ (s) (if (null? s) 0 (+ 1 (size (cdr s))))))) (size %s))";
 
         assertEquals(3, format(size, cons(3, 4, 5)));
         assertEquals(2, format(size, cons(3, 4)));
@@ -239,18 +225,18 @@ public class Test {
 
     void tmp() {
         Env<Expr> env = bootEnv();
-        env.put(Sym.of("x"), compile("'#t'"));
-        env.put(Sym.of("y"), compile("'#f'"));
-        env.put(Sym.of("z"), compile("'#t'"));
-        env.put(Sym.of("b"), compile("'#t'"));
-        env.put(Sym.of("c"), compile("'#t'"));
-        System.err.println(compile("['if', ['and', 'x', ['or', 'y', 'z']], 'b', 'c']", env, CodeGen.scheme, null));
+        env.put(symOf("x"), compile("#t"));
+        env.put(symOf("y"), compile("#f"));
+        env.put(symOf("z"), compile("#t"));
+        env.put(symOf("b"), compile("#t"));
+        env.put(symOf("c"), compile("#t"));
+        System.err.println(compile("(if (and x (or y z)) b c)", env, CodeGen.scheme, null));
     }
 
 
 
     static String num(int n) {
-        return compile(n + "", json);
+        return compile(n + "", scheme);
     }
 
     static String cons(Object ...args) {
@@ -259,9 +245,9 @@ public class Test {
 
     static String cons(List<?> els) {
         if (els.isEmpty()) {
-            return "['quote', []]";
+            return "(quote ())";
         } else {
-            return "['cons', " + els.get(0) + ", " + cons(els.subList(1, els.size())) + "]";
+            return "(cons " + els.get(0) + " " + cons(els.subList(1, els.size())) + ")";
         }
     }
 

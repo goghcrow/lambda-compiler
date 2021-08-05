@@ -1,17 +1,20 @@
 package xiao;
 
-import javax.script.ScriptEngine;
-import javax.script.ScriptEngineManager;
-import javax.script.ScriptException;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.function.Function;
+import java.util.stream.IntStream;
 
+import static java.lang.Character.isDigit;
+import static java.lang.Character.isWhitespace;
+import static java.util.stream.Collectors.toList;
 import static xiao.λ.Compiler.compile1;
+import static xiao.λ.Expr.*;
 import static xiao.λ.Names.*;
-import static xiao.λ.Parser.parse;
+import static xiao.λ.Parser.*;
+import static xiao.λ.Parser.Node.*;
 import static xiao.λ.Primitives.*;
-import static xiao.λ.UnChurchification.*;
+import static xiao.λ.UnChurchification.F;
 
 /**
  * λ<br>
@@ -44,104 +47,71 @@ public interface λ {
         return to.visit(Compiler.compile(parse(src), compilerEnv), toEnv);
     }
 
+    // close 掉 free variable 的 bootstrap 环境
     static Env<Expr> bootEnv() {
         return bootEnv(Compiler.expander);
     }
 
+    // 用 visitor 构建一个 bootstrap 环境
     static <T> Env<T> bootEnv(Visitor<T, Env<T>> vis) {
-        Map<String, String> primitives = new LinkedHashMap<>();
-        primitives.put(VOID, S_VOID);
-
-        // Booleans
-        primitives.put(TRUE, S_TRUE);
-        primitives.put(FALSE, S_FALSE);
-        primitives.put(NOT, S_NOT);
-
-        // Numeral
-        primitives.put(IS_ZERO, S_IS_ZERO);
-        primitives.put(SUM, S_SUM);
-        primitives.put(MUL, S_MUL);
-        primitives.put(POW, S_POW);
-        primitives.put(SUB, S_SUB);
-        primitives.put(EQ, S_EQ);
-        primitives.put(NE, S_NE);
-        primitives.put(LE, S_LE);
-        primitives.put(GE, S_GE);
-        primitives.put(LT, S_LT);
-        primitives.put(GT, S_GT);
-        primitives.put(MOD, S_MOD);
-        primitives.put(DIV, S_DIV);
-
-        // Lists
-        primitives.put(CONS, S_CONS);
-        primitives.put(CAR, S_CAR);
-        primitives.put(CDR, S_CDR);
-        primitives.put(IS_PAIR, S_IS_PAIR);
-        primitives.put(IS_NULL, S_IS_NULL);
-
         Env<T> env = new Env<>(null);
-        primitives.forEach((n, s) -> env.put(Sym.of(n), vis.visit(compile1(parse(s)), env)));
+        primitives().forEach((n, s) -> env.put(symOf(n), vis.visit(compile1(parse(s)), env)));
         return env;
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+    // 试验另一种方式: 不用环境, 把 runtime 放到顶层的 let 里头, 理论可行, 编译到 js 一些 sym 名称不是合法的变量
+    // 而环境替换的方式, 会全部替换掉, 那些 sym 定义的名字都会消失
+    /*
+    static <Target, Ctx> Target compileWithGlobalLet(String code, CodeGen<Target, Ctx> gen) {
+        List<Node> pairs = new ArrayList<>();
+        primitives().forEach((n, s) -> pairs.add(tupleOf(nameOf(n), parse(s))));
+        Tuple globalLet = tupleOf(Compiler.let, tupleOf(pairs), parse(code));
+        return gen.visit(Compiler.compile(globalLet, null), null);
+    }
+    */
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     /* ----------------------- AST ------------------------ */
     interface Expr {
-        default String stringfy() {
-            return CodeGen.scheme.visit(this, null);
+        class Sym implements Expr {
+            final String name;
+            private Sym(String name) { this.name = name; }
+            @Override public String toString() { return name; }
         }
-    }
-    class Sym implements Expr {
-        final String name;
-        private Sym(String name) {
-            this.name = name;
+        class App implements Expr {
+            final Expr abs;
+            final Expr arg;
+            App(Expr abs, Expr arg) {
+                this.abs = abs;
+                this.arg = arg;
+            }
+            @Override public String toString() { return "(" + abs + " " + arg + ")"; }
         }
-        @Override public String toString() {
-            return stringfy();
+        class Abs implements Expr {
+            final Sym param;
+            final Expr body;
+            Abs(Sym param, Expr body) {
+                this.param = param;
+                this.body = body;
+            }
+            @Override public String toString() { return "(" + LAMBDA + " (" + param + ") " + body + ")"; }
         }
-        static final Map<String, Sym> cache = new HashMap<>();
-        static Sym of(String name) {
-            return cache.computeIfAbsent(name, t -> new Sym(name));
-        }
-    }
-    class App implements Expr {
-        final Expr abs;
-        final Expr arg;
-        App(Expr abs, Expr arg) {
-            this.abs = abs;
-            this.arg = arg;
-        }
-        @Override public String toString() {
-            return stringfy();
-        }
-    }
-    class Abs implements Expr {
-        final Sym param;
-        final Expr body;
-        Abs(Sym param, Expr body) {
-            this.param = param;
-            this.body = body;
-        }
-        @Override public String toString() {
-            return stringfy();
-        }
+
+        Map<String, Sym> symCache = new HashMap<>();
+        static Sym symOf(String name) { return symCache.computeIfAbsent(name, t -> new Sym(name)); }
     }
 
     interface Visitor<V, C> {
         V visit(Sym s, C ctx);
         V visit(App s, C ctx);
         V visit(Abs s, C ctx);
-
         default V visit(Expr s, C ctx) {
-            if (s instanceof Sym) {
-                return visit(((Sym) s), ctx);
-            } else if (s instanceof App) {
-                return visit(((App) s), ctx);
-            } else if (s instanceof Abs) {
-                return visit(((Abs) s), ctx);
-            } else {
-                throw new UnsupportedOperationException();
-            }
+            if (s instanceof Sym) return visit(((Sym) s), ctx);
+            if (s instanceof App) return visit(((App) s), ctx);
+            if (s instanceof Abs) return visit(((Abs) s), ctx);
+            else                  throw new UnsupportedOperationException();
         }
     }
 
@@ -151,17 +121,14 @@ public interface λ {
     class Env<V> {
         final Map<Sym, V> env = new LinkedHashMap<>();
         final /*@Nullable*/ Env<V> parent;
-
         Env(/*@Nullable*/ Env<V> parent) {
             this.parent = parent;
         }
-
         // define
         void put(Sym var, V val) {
             assert !env.containsKey(var); // redefine
             env.put(var, val);
         }
-
         V lookup(Sym sym) {
             V val = env.get(sym);
             if (val != null) {
@@ -177,29 +144,193 @@ public interface λ {
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     /* ---------------------- Parser ------------------------ */
     class Parser {
-        static ScriptEngine engine = new ScriptEngineManager().getEngineByName("javascript");
 
-        // String ->  Map | List | String | Integer
-        public static Object parse(String s) {
-            try {
-                return engine.eval("Java.asJSONCompatible(" + s + ")");
-            } catch (ScriptException e) {
-                throw new RuntimeException(e);
+        interface Node {
+            class Delimiter implements Node {
+                final char shape;
+                Delimiter(char shape) { this.shape = shape; }
+                @Override public String toString() { return Character.toString(shape); }
+            }
+            class Name implements Node {
+                final String id;
+                Name(String id) { this.id = id; }
+                @Override public String toString() { return id; }
+            }
+            class Tuple implements Node {
+                final List<Node> els;
+                Tuple(List<Node> els) {
+                    this.els = els;
+                }
+                @Override public String toString() {
+                    StringBuilder sb = new StringBuilder();
+                    for (int i = 0; i < els.size(); i++) {
+                        sb.append(els.get(i).toString());
+                        if (i != els.size() - 1) {
+                            sb.append(" ");
+                        }
+                    }
+                    return TUPLE_BEGIN + sb.toString() + TUPLE_END;
+                }
+            }
+            class Str implements Node {
+                final String value;
+                Str(String value) { this.value = value; }
+                @Override public String toString() { return "\"" + value + "\""; }
+            }
+            class Int implements Node {
+                @Override public String toString() { return Integer.toString(value); }
+                final int value;
+                Int(int val) { this.value = val; }
+                Int(String content) { this.value = Integer.parseInt(content); }
+            }
+
+            static Tuple tupleOf(Node ...its) {
+                List<Node> lst = new ArrayList<>(its.length);
+                Collections.addAll(lst, its);
+                return new Tuple(lst);
+            }
+
+            static Tuple tupleOf(List<Node> lst) { return new Tuple(lst); }
+            static Name nameOf(String s) { return new Name(s); }
+            static Str strOf(String s) { return new Str(s); }
+            static Int intOf(int i) { return new Int(i); }
+        }
+
+        public static Node parse(String s) {
+            List<Node> nodes = new Parser(s).parse();
+            assert nodes.size() == 1;
+            return nodes.get(0);
+        }
+
+        final static String LINE_COMMENT = ";";
+        final static char TUPLE_BEGIN = '(';
+        final static char TUPLE_END = ')';
+
+        final String input;
+        int offset = 0;
+
+        public Parser(String input) {
+            this.input = input;
+        }
+
+        public List<Node> parse() {
+            List<Node> elements = new ArrayList<>();
+            Node s = nextSexp();
+            while (s != null) {
+                elements.add(s);
+                s = nextSexp();
+            }
+            return elements;
+        }
+
+        Node nextSexp() { return nextNode(0); }
+
+        /*@Nullable*/ Node nextNode(int depth) {
+            Node begin = nextToken();
+            if (begin == null) {
+                return null;
+            }
+
+            if (depth == 0 && isClose(begin)) {
+                throw new RuntimeException("不匹配: " + begin);
+            } else if (isOpen(begin)) {
+                List<Node> elements = new ArrayList<>();
+                Node iter = nextNode(depth + 1);
+                while (!matchDelimiter(begin, iter)) {
+                    if (iter == null) {
+                        throw new RuntimeException("未闭合: " + begin);
+                    } else if (isClose(iter)) {
+                        throw new RuntimeException("不匹配: " + iter);
+                    } else {
+                        elements.add(iter);
+                        iter = nextNode(depth + 1);
+                    }
+                }
+                return new Tuple(elements);
+            } else {
+                return begin;
             }
         }
-    }
 
+        /*@Nullable*/ Node nextToken() {
+            skipComment();
+            if (offset >= input.length()) {
+                return null;
+            }
+
+            char cur = input.charAt(offset);
+            if (isDelimiter(cur)) {
+                offset++;
+                return new Delimiter(cur);
+            }
+
+            if (input.charAt(offset) == '"' && (offset == 0 || input.charAt(offset - 1) != '\\')) {
+                int start = offset;
+                offset++; // skip "
+                while (offset < input.length() && !(input.charAt(offset) == '"' && input.charAt(offset - 1) != '\\')) {
+                    if (input.charAt(offset) == '\n') {
+                        throw new RuntimeException("字符串不能换行");
+                    }
+                    offset++;
+                }
+                if (offset >= input.length()) {
+                    throw new RuntimeException("未闭合字符串");
+                }
+                offset++; // skip "
+                int end = offset;
+                String content = input.substring(start + 1, end - 1);
+                return new Str(content);
+            }
+
+            int start = offset;
+            if (isDigit(input.charAt(start))) {
+                while (offset < input.length() && !isWhitespace(cur) && !isDelimiter(cur)) {
+                    if (++offset < input.length()) {
+                        cur = input.charAt(offset);
+                    }
+                }
+                return new Int(input.substring(start, offset));
+            }
+
+            while (offset < input.length() && !isWhitespace(cur) && !isDelimiter(cur)) {
+                if (++offset < input.length()) {
+                    cur = input.charAt(offset);
+                }
+            }
+            return new Name(input.substring(start, offset));
+        }
+
+        void skipComment() {
+            boolean seenComment = true;
+            while (seenComment) {
+                seenComment = false;
+                while (offset < input.length() && isWhitespace(input.charAt(offset))) {
+                    offset++;
+                }
+                if (offset + LINE_COMMENT.length() <= input.length() && input.startsWith(LINE_COMMENT, offset)) {
+                    while (offset < input.length() && input.charAt(offset) != '\n') {
+                        offset++;
+                    }
+                    if (offset < input.length()) {
+                        offset++;
+                    }
+                    seenComment = true;
+                }
+            }
+        }
+
+        boolean isDelimiter(char c) { return c == TUPLE_BEGIN || c == TUPLE_END; }
+        boolean isOpen(Node c) { return c instanceof Delimiter && ((Delimiter) c).shape == TUPLE_BEGIN; }
+        boolean isClose(Node c) { return c instanceof Delimiter && ((Delimiter) c).shape == TUPLE_END; }
+        boolean matchDelimiter(Node open, Node close) { return isOpen(open) && isClose(close); }
+    }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     /* --------------------  Compiler ----------------------- */
-    @SuppressWarnings("rawtypes")
     class Compiler {
-
-        static Object Y = parse(S_Y);
-        static Object NIL = parse(S_NIL);
         final static Visitor<Expr, Env<Expr>> expander = new Expander();
 
-        // expander 负责把 free var 都替换掉, 保证生成结果 expr 都是 closed term
+        // expander 负责把 close 掉 free var, 保证生成结果 expr 都是 closed term
         static class Expander implements Visitor<Expr, Env<Expr>> {
             @Override public Expr visit(Sym s, Env<Expr> env) { return env.lookup(s); }
             @Override public Expr visit(App s, Env<Expr> env) { return new App(visit(s.abs, env), visit(s.arg, env)); }
@@ -212,139 +343,151 @@ public interface λ {
             }
         }
 
-        static Expr compile(Object s, Env<Expr> env) {
-            return expander.visit(compile1(s), env);
+        static Expr compile(Node node, Env<Expr> env) {
+            return expander.visit(compile1(node), env);
+        }
+
+        static boolean is(Node n, String s) {
+            return (n instanceof Name) && ((Name) n).id.equals(s);
         }
 
         // 注意: 不能直接替换代码, 一个case (λ (+) (+ 0 0))
-        static Expr compile1(Object exp) {
-            if (exp instanceof List) {
-                List s = ((List) exp);
-                int sz = s.size();
-                // if (sz == 0) return Sym.of(NIL);
-                assert !s.isEmpty();
+        static Expr compile1(Node n) {
+            if (n instanceof Tuple) {
+                List<Node> ns = ((Tuple) n).els;
+                int sz = ns.size();
+                assert sz != 0;
 
-                Object car = s.get(0);
+                Node car = ns.get(0);
 
                 // Lambdas
-                if (LAMBDA.equals(car)) {
-                    return compileLambda(s);
+                if (is(car, LAMBDA)) {
+                    return compileLambda(ns);
                 }
 
                 // Conditionals
                 // and or 需要处理短路, 不能定义成 primitive
-                else if (IF.equals(car)) {
-                    // [if, cond, then, orElse] => [cond, [lambda, [], then], [lambda, [], orElse]]
+                if (is(car, IF)) {
+                    // (if cond then orElse) ~> (cond (lambda () then) (lambda () orElse))
                     assert sz == 4;
-                    Object cond = s.get(1);
-                    List then = list(LAMBDA, list(), s.get(2));
-                    List orElse = list(LAMBDA, list(), s.get(3));
-                    return compile1(list(cond, then, orElse));
-                } else if (AND.equals(car)) {
-                    // [and, a, b] => [if, a, b, #f]
+                    Node cond = ns.get(1);
+                    Tuple then = tupleOf(λ, tupleOf(), ns.get(2));
+                    Tuple orElse = tupleOf(λ, tupleOf(), ns.get(3));
+                    return compile1(tupleOf(cond, then, orElse));
+                }
+                if (is(car, AND)) {
+                    // (and a b) ~> (if a b #f)
                     assert sz == 3;
-                    return compile1(list(IF, s.get(1), s.get(2), FALSE));
-                } else if (OR.equals(car)) {
-                    // [or, a, b] => [if, a, #t, b]
+                    return compile1(tupleOf(iff, ns.get(1), ns.get(2), False));
+                }
+                if (is(car, OR)) {
+                    // (or a b) ~> (if a #t b)
                     assert sz == 3;
-                    return compile1(list(IF, s.get(1), TRUE, s.get(2)));
+                    return compile1(tupleOf(iff, ns.get(1), True, ns.get(2)));
                 }
 
                 // Binding Forms
-                else if (LET.equals(car)) {
-                    return compileLet(s);
-                } else if (LET_REC.equals(car)) {
-                    return compileLetRec(s);
+                if (is(car, LET)) {
+                    return compileLet(ns);
+                }
+                if (is(car, LET_REC)) {
+                    return compileLetRec(ns);
                 }
 
                 // Quote
-                else if (QUOTE.equals(car)) {
+                if (is(car, QUOTE)) {
                     assert sz == 2;
-                    Object cdr = s.get(1);
-                    // 只支持 ['quote', []] 表达 nil
-                    assert cdr instanceof List;
-                    assert ((List<?>) cdr).isEmpty();
+                    Node cdr = ns.get(1);
+                    // 只支持 (quote ()) 表达 nil
+                    assert cdr instanceof Tuple;
+                    assert ((Tuple) cdr).els.isEmpty();
                     return compile1(NIL);
                 }
 
                 // Application -- must be last
-                else {
-                    return compileApply(s);
-                }
+                return compileApply(ns);
             }
 
             // Numerals
-            else if (exp instanceof Integer) {
-                // church-numeral
-                return churchNumeral(((Integer) exp));
+            if (n instanceof Int) {
+                return churchNumeral((Int) n);
             }
 
             // Symbol & String
-            else if (exp instanceof String) {
-                String s = (String) exp;
-                if (s.startsWith("\"")) {
-                    assert s.endsWith("\"");
-                    return compileStr(s.substring(1, s.length() - 1));
-                } else {
-                    return Sym.of(((String) exp));
-                }
+            if (n instanceof Str) {
+                return compileStr((Str) n);
             }
 
-            else {
-                throw new IllegalStateException();
+            if (n instanceof Name) {
+                return symOf(((Name) n).id);
             }
+
+            throw new IllegalStateException();
         }
 
-        static Expr compileLet(List lst) {
-            // [let, [[v1, exp1], ... [vN, expN]], body] => [[lambda, [v1, ... vN], body], exp1, ... expN]
-            int sz = lst.size();
+        // (let ((v1 exp1) ... (vN expN)) body) ~> ((lambda (v1 ... vN) body) exp1 ... expN)
+        static Expr compileLet(List<Node> ns) {
+            int sz = ns.size();
             assert sz == 3;
-            assert lst.get(1) instanceof List;
-            List pairs = (List) lst.get(1);
-            List<String> params = new ArrayList<>(pairs.size());
-            List<Object> args = new ArrayList<>(pairs.size());
-            for (Object pair : pairs) {
-                assert pair instanceof List && ((List) pair).size() == 2;
-                Object param = ((List) pair).get(0);
-                assert param instanceof String;
-                params.add(((String) param));
-                args.add(((List) pair).get(1));
+            assert ns.get(1) instanceof Tuple;
+
+            List<Node> pairs = ((Tuple) ns.get(1)).els;
+            List<Node> params = new ArrayList<>(pairs.size());
+            List<Node> applyArgs = new ArrayList<>(pairs.size() + 1);
+
+            Node body = ns.get(2);
+            Tuple apply = tupleOf(λ, tupleOf(params), body);
+            applyArgs.add(apply);
+
+            for (Node it : pairs) {
+                assert it instanceof Tuple;
+                List<Node> pair = ((Tuple) it).els;
+                assert pair.size() == 2;
+
+                Node param = pair.get(0);
+                assert param instanceof Name;
+                params.add(param);
+
+                Node arg = pair.get(1);
+                applyArgs.add(arg);
             }
-            List<Object> let = list(list(LAMBDA, params, lst.get(2)));
-            let.addAll(args);
-            return compile1(let);
+            // let 声明的变量之间不能相互依赖
+            return compile1(tupleOf(applyArgs));
         }
 
-        static Expr compileLetRec(List lst) {
-            // ['letrec', [['f', 'lam']], 'body'] => ['let', [['f', ['Y', ['λ', ['f'], 'lam']]]], 'body']
-            int sz = lst.size();
+        // (letrec ((f lam)) body) ~> (let ((f (Y (λ (f) lam)))) body)
+        static Expr compileLetRec(List<Node> ns) {
+            int sz = ns.size();
             assert sz == 3;
-            assert lst.get(1) instanceof List;
-            List pairs = (List) lst.get(1);
+            assert ns.get(1) instanceof Tuple;
+            List<Node> pairs = ((Tuple) ns.get(1)).els;
             assert pairs.size() == 1;
-            Object pair0 = pairs.get(0);
-            assert pair0 instanceof List && ((List) pair0).size() == 2;
-            List pair = (List) pair0;
-            Object f = pair.get(0);
-            Object lam = pair.get(1);
-            Object body = lst.get(2);
-            List let = list(LET, list(list(f, list(Y, list(LAMBDA, list(f), lam)))), body);
-            return compile1(let);
+
+            Node pair0 = pairs.get(0);
+            assert pair0 instanceof Tuple;
+            List<Node> pair = ((Tuple) pair0).els;
+            assert pair.size() == 2;
+
+            Node f = pair.get(0);
+            Node lam = pair.get(1);
+            Node body = ns.get(2);
+            Tuple letrec = tupleOf(let, tupleOf(tupleOf(f, tupleOf(Y, tupleOf(λ, tupleOf(f), lam)))), body);
+            return compile1(letrec);
         }
 
-        static Expr compileLambda(List lst) {
-            // Currying
-            // [lambda, [v1, ... vN], body] => [lambda, [v1], [lambda, [v2], ... [lambda, [vN], body]]]
-            int sz = lst.size();
+        // Currying
+        // (λ (v1 ... vN) body) ~> (λ (v1) (λ (v2) ... (λ (vN) body)))
+        static Expr compileLambda(List<Node> ns) {
+            int sz = ns.size();
             assert sz == 3;
-            Object params = lst.get(1);
-            Object body = lst.get(2);
+            Node params = ns.get(1);
+            Node body = ns.get(2);
 
-            assert params instanceof List;
-            List paramLst = (List) params;
+            assert params instanceof Tuple;
+            List<Node> paramLst = ((Tuple) params).els;
             int paramSz = paramLst.size();
             if (paramSz == 0) {
-                return new Abs(Sym.of("_"), compile1(body));
+                return new Abs(symOf("_"), compile1(body));
             } else if (paramSz == 1) {
                 Expr param = compile1(paramLst.get(0));
                 assert param instanceof Sym;
@@ -352,65 +495,67 @@ public interface λ {
             } else {
                 Expr param = compile1(paramLst.get(0));
                 assert param instanceof Sym;
-                List subLam = list(LAMBDA, paramLst.subList(1, paramSz), body);
+                Tuple subLam = tupleOf(λ, tupleOf(paramLst.subList(1, paramSz)), body);
                 return new Abs((Sym) param, compile1(subLam));
             }
         }
 
-        static Expr compileApply(List lst) {
-            int sz = lst.size();
-            // Currying
-            // [f, arg1, ... argN] => [... [[f, arg1], arg2], ... argN]
-            // [a, b, c, c] => [[[a, b], c], d]
+        // Currying
+        // (f arg1 ... argN) ~> (... ((f arg1) arg2) ... argN)
+        // (a b c c) ~> (((a b) c) d)
+        static Expr compileApply(List<Node> ns) {
+            int sz = ns.size();
             if (sz == 1) {
-                return new App(compile1(lst.get(0)), Sym.of(VOID));
+                return new App(compile1(ns.get(0)), symOf(VOID));
             } else if (sz == 2) {
-                return new App(compile1(lst.get(0)), compile1(lst.get(1)));
+                return new App(compile1(ns.get(0)), compile1(ns.get(1)));
             } else {
-                return new App(compile1(lst.subList(0, lst.size() - 1)), compile1(lst.get(lst.size() - 1)));
-            }
-        }
-
-        static Expr compileStr(String s) {
-            return compile1(cons(Arrays.asList(s.chars().boxed().toArray())));
-        }
-
-        static List<?> cons(List<?> els) {
-            if (els.isEmpty()) {
-                return list(QUOTE, list());
-            } else {
-                return list(CONS,  els.get(0), cons(els.subList(1, els.size())));
-            }
-        }
-
-        static Object churchNumeralApplyN(String z, String f, int n) {
-            assert n >= 0;
-            if (n == 0) {
-                return z;
-            } else {
-                return list(f, churchNumeralApplyN(z, f, n - 1));
+                return new App(compile1(tupleOf(ns.subList(0, ns.size() - 1))), compile1(ns.get(ns.size() - 1)));
             }
         }
 
         // 丘齐数就是将 f 应用到 z 的次数
-        static Expr churchNumeral(int nat) {
-            assert nat >= 0;
-            String f = "f";
-            String z = "z";
-            if (nat == 0) {
-                // [lambda, [f], [lambda, [z], z]]
-                return compile1(list(LAMBDA, list(f), list(LAMBDA, list(z), z)));
+        // 0:  (λ (f) (λ (z) z))
+        // (λ (f) (λ (z) ($apply-n $n)))  -> (λ (f z) ($apply-n $n))
+        static Expr churchNumeral(Int nat) {
+            assert nat.value >= 0;
+            Name f = nameOf("f");
+            Name z = nameOf("z");
+            Node applyN = z;
+            for (int i = 0; i < nat.value; i++) {
+                applyN = tupleOf(f, applyN);
+            }
+            return compile1(tupleOf(λ, tupleOf(f, z), applyN));
+        }
+
+        static Expr compileStr(Str s) {
+            /*return compile1(new StringBuilder(s.value).reverse().chars().boxed()
+                    .map(Node::intOf).reduce(
+                            tupleOf(quote, tupleOf()),
+                            (acc, i) -> tupleOf(cons, i, acc),
+                            (a, b) -> b));*/
+            return compile1(cons(s.value.chars().boxed().map(Node::intOf).collect(toList())));
+        }
+
+        static Tuple cons(List<Node> els) {
+            if (els.isEmpty()) {
+                return tupleOf(quote, tupleOf());
             } else {
-                // [lambda, [f], [lambda, [z] [$apply-n $n]]]
-                return compile1(list(LAMBDA, list(f), list(LAMBDA, list(z), churchNumeralApplyN(z, f, nat))));
+                return tupleOf(cons,  els.get(0), cons(els.subList(1, els.size())));
             }
         }
 
-        static List<Object> list(Object ...its) {
-            List<Object> lst = new ArrayList<>(its.length);
-            Collections.addAll(lst, its);
-            return lst;
-        }
+        final static Node Y = parse(S_Y);
+        final static Node NIL = parse(S_NIL);
+
+        final static Name λ = nameOf(LAMBDA);
+        final static Name let = nameOf(LET);
+        final static Name cons = nameOf(CONS);
+        final static Name quote = nameOf(QUOTE);
+        final static Name iff = nameOf(IF);
+        final static Name True = nameOf(TRUE);
+//        final static Name False = nameOf(FALSE);
+        final static Node False = parse(S_FALSE);
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -554,7 +699,7 @@ public interface λ {
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
+    /* --------------------  CodeGen ----------------------- */
     interface CodeGen<V, C> extends Visitor<V, C> {
 
         CodeGen<F, Env<F>> java = UnChurchification.compiler;
@@ -568,36 +713,22 @@ public interface λ {
         // natify : (+ n 1)(0)
         // boolity: (λ () #t)(λ () #f)
         CodeGen<String, Void> scheme = new CodeGen<String, Void>() {
-            @Override public String visit(Sym s, Void v) {
-                return s.name;
-            }
-            @Override public String visit(App s, Void v) {
-                return "(" + visit(s.abs, v) + " " + visit(s.arg, v) + ")";
-            }
-            @Override public String visit(Abs s, Void v) {
-                return "(" + LAMBDA + " (" + visit(s.param, v) + ") " + visit(s.body, v) + ")";
-            }
+            @Override public String visit(Sym s, Void v) { return s.name; }
+            @Override public String visit(App s, Void v) { return "(" + visit(s.abs, v) + " " + visit(s.arg, v) + ")"; }
+            @Override public String visit(Abs s, Void v) { return "(" + LAMBDA + " (" + visit(s.param, v) + ") " + visit(s.body, v) + ")"; }
         };
 
         CodeGen<String, Void> json = new CodeGen<String, Void>() {
-            @Override public String visit(Sym s, Void v) {
-                return "'" + s.name + "'";
-            }
-            @Override public String visit(App s, Void v) {
-                return "[" + visit(s.abs, v) + ", " + visit(s.arg, v) + "]";
-            }
-            @Override public String visit(Abs s, Void v) {
-                return "['" + LAMBDA + "', [" + visit(s.param, v) + "], " + visit(s.body, v) + "]";
-            }
+            @Override public String visit(Sym s, Void v) { return "'" + s.name + "'"; }
+            @Override public String visit(App s, Void v) { return "[" + visit(s.abs, v) + ", " + visit(s.arg, v) + "]"; }
+            @Override public String visit(Abs s, Void v) { return "['" + LAMBDA + "', [" + visit(s.param, v) + "], " + visit(s.body, v) + "]"; }
         };
 
         // natify : ((%s)(n => n + 1)(0))
         // boolify: ((%s)(_ => true)(_ => false))
         // (() => { let unchurchify = (churched) => churched(car => cdr => [car(n => n+1)(0), unchurchify(cdr)])(nil => null); return unchurchify })()(%s)
         CodeGen<String, Void> js = new CodeGen<String, Void>() {
-            @Override public String visit(Sym s, Void v) {
-                return s.name;
-            }
+            @Override public String visit(Sym s, Void v) { return s.name; }
             @Override public String visit(App s, Void v) {
                 if (s.abs instanceof Sym) {
                     return visit(s.abs, v) + "(" + visit(s.arg, v) + ")";
@@ -605,23 +736,15 @@ public interface λ {
                     return "(" + visit(s.abs, v) + ")" + "(" + visit(s.arg, v) + ")";
                 }
             }
-            @Override public String visit(Abs s, Void v) {
-                return "(" + visit(s.param, v) + " => " + visit(s.body, v) + ")";
-            }
+            @Override public String visit(Abs s, Void v) { return "(" + visit(s.param, v) + " => " + visit(s.body, v) + ")"; }
         };
 
         // natify : (lambda n: n + 1)(0)
         // boolify: (lambda _: true)(lambda _: false)
         CodeGen<String, Void> py = new CodeGen<String, Void>() {
-            @Override public String visit(Sym s, Void v) {
-                return s.name;
-            }
-            @Override public String visit(App s, Void v) {
-                return "((" + visit(s.abs, v) + ")(" + visit(s.arg, v) + "))";
-            }
-            @Override public String visit(Abs s, Void v) {
-                return "(lambda " + s.param.name + ": (" + visit(s.body, v) + "))";
-            }
+            @Override public String visit(Sym s, Void v) { return s.name; }
+            @Override public String visit(App s, Void v) { return "((" + visit(s.abs, v) + ")(" + visit(s.arg, v) + "))"; }
+            @Override public String visit(Abs s, Void v) { return "(lambda " + s.param.name + ": (" + visit(s.body, v) + "))"; }
         };
     }
 
@@ -668,120 +791,142 @@ public interface λ {
         String LET_REC = "letrec";
     }
 
+    static Map<String, String> primitives() {
+        Map<String, String> primitives = new LinkedHashMap<>();
+        primitives.put(VOID, S_VOID);
+
+        // Booleans
+        primitives.put(TRUE, S_TRUE);
+        primitives.put(FALSE, S_FALSE);
+        primitives.put(NOT, S_NOT);
+
+        // Numeral
+        primitives.put(IS_ZERO, S_IS_ZERO);
+        primitives.put(SUM, S_SUM);
+        primitives.put(MUL, S_MUL);
+        primitives.put(POW, S_POW);
+        primitives.put(SUB, S_SUB);
+        primitives.put(EQ, S_EQ);
+        primitives.put(NE, S_NE);
+        primitives.put(LE, S_LE);
+        primitives.put(GE, S_GE);
+        primitives.put(LT, S_LT);
+        primitives.put(GT, S_GT);
+        primitives.put(MOD, S_MOD);
+        primitives.put(DIV, S_DIV);
+
+        // Lists
+        primitives.put(CONS, S_CONS);
+        primitives.put(CAR, S_CAR);
+        primitives.put(CDR, S_CDR);
+        primitives.put(IS_PAIR, S_IS_PAIR);
+        primitives.put(IS_NULL, S_IS_NULL);
+
+        return primitives;
+    }
+
     interface Primitives {
         // 这里不用定义成单参的函数, compile1 会做 curry 处理
 
-        // (λ (_)
-        //  ((λ (f) (f f))
-        //   (λ (f) (f f))))
-        String S_ERROR = "['λ', ['_'], [['λ', ['f'], ['f', 'f']], ['λ', ['f'], ['f', 'f']]]]";
+        String S_ERROR = "(λ (_) " +
+                            "((λ (f) (f f)) " +
+                             "(λ (f) (f f))))";
 
         // https://www.slideshare.net/yinwang0/reinventing-the-ycombinator
-        String S_Y = "[['λ', ['y'], ['λ', ['F'], ['F', ['λ', ['x'], [[['y', 'y'], 'F'], 'x']]]]],\n" +
-                     " ['λ', ['y'], ['λ', ['F'], ['F', ['λ', ['x'], [[['y', 'y'], 'F'], 'x']]]]]]";
+        String S_Y = "((λ (y) (λ (F) (F (λ (x) (((y y) F) x))))) " +
+                      "(λ (y) (λ (F) (F (λ (x) (((y y) F) x))))))";
 
         // (λ (void) void)
-        String S_VOID = "['λ', ['" + VOID + "'], '" + VOID + "']";
+        String S_VOID = "(λ (" + VOID + ") " + VOID + ")";
 
         // (λ (on_cons) (λ (on_nil) (on_nil ,S_VOID)) )
         // (λ (on_cons on_nil) (on_nil ,S_VOID))
-        String S_NIL = "['λ', ['on_cons', 'on_nil'], ['on_nil', " + S_VOID + "]]";
+        String S_NIL = "(λ (on_cons on_nil) (on_nil " + S_VOID + "))";
 
         // (λ (t) (λ (f) (t ,S_VOID)))
-        String S_TRUE = "['λ', ['t', 'f'], ['t', '" + VOID + "']]";
+        String S_TRUE = "(λ (t f) (t " + S_VOID + "))";
+
         // (λ (t) (λ (f) (f ,S_VOID)))
-        String S_FALSE = "['λ',['t', 'f'], ['f', '" + VOID + "']]";
+        String S_FALSE = "(λ (t f) (f " + S_VOID + "))";
 
-        String S_THUNK_TRUE = "['λ', ['_'], " + S_TRUE + "]";;
-        String S_THUNK_FALSE = "['λ', ['_'], " + S_FALSE + "]";
+        String S_THUNK_TRUE = "(λ (_) " + S_TRUE + ")";
+        String S_THUNK_FALSE = "(λ (_) " + S_FALSE + ")";
 
-        String S_NOT = "['λ', ['b'], ['b', " + S_THUNK_FALSE + ", " + S_THUNK_TRUE + "]]";
+
+        String S_NOT = "(λ (b) (b " + S_THUNK_FALSE + " " + S_THUNK_TRUE + "))";
 
         // (λ (n) ((n (λ (_) ,S_FALSE)) ,S_TRUE))
-        String S_IS_ZERO = "['λ', ['n'], [['n', " + S_THUNK_FALSE + "], " + S_TRUE + "]]";
+        String S_IS_ZERO = "(λ (n) ((n " + S_THUNK_FALSE + ") " + S_TRUE + "))";
 
 
         // (λ (n) (λ (f) (λ (z) (f (n (f z))))))
         // (λ (n f z) (f (n f z)))
-        String S_SUCC = "['λ', ['n', 'f', 'z'], ['f', ['n', 'f', 'z']]]";
+        String S_SUCC = "(λ (n f z) (f (n f z)))";
 
         // (λ (n) (λ (m) (λ (f) (λ (z) ((m f) ((n f) z))))))
         // (λ (n m)  (λ (f z) (m f (n f z))))
         // (λ (n m f z)  (m f (n f z)))
-        String S_SUM = "['λ', ['n', 'm', 'f', 'z'], ['m', 'f', ['n', 'f', 'z']]]";
+        String S_SUM = "(λ (n m f z) (m f (n f z)))";
 
         // (λ (n) (λ (m) (λ (f) (λ (z) ((m (n f)) z)))))
         // (λ (n m)  (λ (f z) (m (n f) z)))
         // (λ (n m f z) (m (n f) z))
-        String S_MUL = "['λ', ['n', 'm', 'f', 'z'], ['m', ['n', 'f'], 'z']]";
+        String S_MUL = "(λ (n m f z) (m (n f) z))";
 
-        String S_ONE = "['λ', ['f', 'z'], ['f', 'z']]";
-        String S_POW = "['λ', ['m', 'n'], [['n', [" + S_MUL + ", 'm']], " + S_ONE + "]]";
+        String S_ONE = "(λ (f z) (f z))";
+
+        String S_POW = "(λ (m n) ((n (" + S_MUL + " m)) " +  S_ONE + "))";
+
+        // (λ (n) (λ (f) (λ (z) (((n (λ (g) (λ (h) (h (g f))))) (λ (u) z)) (λ (u) u)))))
+        // (λ (n f z) (n   (λ (g h) (h (g f)))    (λ (u) z)    (λ (u) u)  ))
+        String S_PRED = "(λ (n f z) (n (λ (g h) (h (g f))) (λ (u) z) (λ (u) u)))";
+
+        // 注意: 这路程针对自然数的减法变种，称作饱和减法 （Monus，由 minus 修改而来）
+        // 由于没有负的自然数，如果被减数比减数小，我们就将结果取零。
+        // (λ (n) (λ (m) ((m ,S_PRED) n)))
+        // (λ (n m) (m ,S_PRED n))
+        String S_SUB = "(λ (n m) (m " + S_PRED + " n))";
+
+        // (λ (x y) (and (zero? (- x y)) (zero? (- y x))))
+        String S_EQ = "(λ (x y) (" + AND + " (" + S_IS_ZERO + " (" + S_SUB + " x y)) (" + S_IS_ZERO + " (" + S_SUB + " y x))))";
+
+        String S_NE = "(λ (x y) (" + S_NOT + " (" + S_EQ + " x y)))";
+
+        String S_LE = "(λ (m n) (" + S_IS_ZERO + " (" + S_SUB + " m n)))";
+        String S_GE = "(λ (m n) (" + S_IS_ZERO + " (" + S_SUB + " n m)))";
+
+        String S_LT = "(λ (m n) (" + AND + " (" + S_LE + " m n) (" + S_NE + " m n)))";
+        String S_GT = "(λ (m n) (" + AND + " (" + S_GE + " m n) (" + S_NE + " m n)))";
 
         // (Y (λ (mod)
         //     (λ (m n)
         //       (if (<= n m)
         //           (mod (- m n) n)
         //           m))))
-        String S_MOD = "[" + S_Y + ", ['λ', ['mod'],\n" +
-                "  ['λ', ['m', 'n'],\n" +
-                "    ['if', ['=', 'n', 0], \n" +
-                "           " + S_ERROR + ", \n" +
-                "           ['if', ['<=', 'n', 'm'],\n" +
-                "                  ['mod', ['-', 'm', 'n'], 'n'],\n" +
-                "                  'm']]]]]";
+        String S_MOD = "(" + S_Y + " (λ (mod) (λ (m n) (if (" + S_EQ + " n 0) " + S_ERROR + " (if (" + S_LE + " n m) (mod (" + S_SUB + " m n) n) m)))))";
+        String S_DIV = "(" + S_Y + " (λ (div) (λ (m n) (if (" + S_EQ + " n 0) " + S_ERROR + " (if (" + S_LE + " n m) (" + S_SUM + " 1 (div (" + S_SUB + " m n) n)) 0)))))";
 
-        String S_DIV = "[" + S_Y + ", ['λ', ['div'],\n" +
-                "  ['λ', ['m', 'n'],\n" +
-                "    ['if', ['=', 'n', 0], \n" +
-                "           " + S_ERROR + ", \n" +
-                "           ['if', ['<=', 'n', 'm'],\n" +
-                "                  ['+', 1, ['div', ['-', 'm', 'n'], 'n']],\n" +
-                "                  0]]]]]";
-
-        // (λ (n) (λ (f) (λ (z) (((n (λ (g) (λ (h) (h (g f))))) (λ (u) z)) (λ (u) u)))))
-        // (λ (n f z) (n   (λ (g h) (h (g f)))    (λ (u) z)    (λ (u) u)  ))
-        String S_PRED = "['λ', ['n', 'f', 'z'],  ['n',   ['λ', ['g', 'h'], ['h', ['g', 'f']]],   ['λ', ['u'], 'z'],    ['λ', ['u'], 'u']  ]]";
-
-        // 注意: 这路程针对自然数的减法变种，称作饱和减法 （Monus，由 minus 修改而来）
-        // 由于没有负的自然数，如果被减数比减数小，我们就将结果取零。
-        // (λ (n) (λ (m) ((m ,S_PRED) n)))
-        // (λ (n m) (m ,S_PRED n))
-        String S_SUB = "['λ', ['n', 'm'], ['m', " + S_PRED + ", 'n']]";
-
-        // (λ (x y) (and (zero? (- x y)) (zero? (- y x))))
-        String S_EQ = "['λ', ['x', 'y'], ['" + AND + "',   ['" + IS_ZERO + "', ['-', 'x', 'y']],   ['" + IS_ZERO + "', ['-', 'y', 'x']]]]";
-
-        String S_NE = "['λ', ['x', 'y'], [" + S_NOT + ", [" + S_EQ + ", 'x', 'y']]]";
-
-        String S_LE = "['λ', ['m', 'n'], ['zero?', ['-', 'm', 'n']]]";
-        String S_GE = "['λ', ['m', 'n'], ['zero?', ['-', 'n', 'm']]]";
-
-        String S_LT = "['λ', ['m', 'n'], ['and', [" + S_LE + ", 'm', 'n'], [" + S_NE + ", 'm', 'n']]]";
-        String S_GT = "['λ', ['m', 'n'], ['and', [" + S_GE + ", 'm', 'n'], [" + S_NE + ", 'm', 'n']]]";
 
         // (λ (car) (λ (cdr) (λ (on_cons) (λ (on_nil) ((on_cons car) cdr)))))
         // (λ (car cdr on_cons on_nil) (on_cons car cdr))
-        String S_CONS = "['λ', ['car', 'cdr', 'on_cons', 'on_nil'], ['on_cons', 'car', 'cdr']]";
+        String S_CONS = "(λ (car cdr on_cons on_nil) (on_cons car cdr))";
 
         // (λ (list) ((list (λ (car) (λ (cdr) car))) ,S_ERROR))
         // (λ (list) (list (λ (car cdr) car) ,S_ERROR))
-        String S_CAR = "['λ', ['list'], ['list', ['λ', ['car', 'cdr'], 'car'], " + S_ERROR + "]]";
+        String S_CAR = "(λ (list) (list (λ (car cdr) car) " + S_ERROR + "))";
 
         // (λ (list) ((list (λ (car) (λ (cdr) cdr))) ,ERROR))
         // (λ (list) (list (λ (car cdr) cdr) ,S_ERROR))
-        String S_CDR = "['λ', ['list'], ['list', ['λ', ['car', 'cdr'], 'cdr'], " + S_ERROR + "]]";
+        String S_CDR = "(λ (list) (list (λ (car cdr) cdr) " + S_ERROR + "))";
 
         // (λ (list) ((list (λ (_) (λ (_) ,S_TRUE))) (λ (_) ,S_FALSE)))
         // (λ (list) (list (λ (_1 _2) ,S_TRUE) (λ (_) ,S_FALSE)))
-        String S_IS_PAIR = "['λ', ['list'], ['list', ['λ', ['_'], " + S_THUNK_TRUE + "], " + S_THUNK_FALSE + "]]";
+        String S_IS_PAIR = "(λ (list) (list (λ (_) " + S_THUNK_TRUE + ") " + S_THUNK_FALSE + "))";
 
         // (λ (list) ((list (λ (_) (λ (_) ,S_FALSE))) (λ (_) ,S_TRUE)))
         // (λ (list) (list (λ (_1 _2) ,S_FALSE) (λ (_) ,S_TRUE)))
-        String S_IS_NULL = "['λ', ['list'], ['list', ['λ', ['_'], " + S_THUNK_FALSE + "], " + S_THUNK_TRUE + "]]";
-
+        String S_IS_NULL = "(λ (list) (list (λ (_) " + S_THUNK_FALSE + ") " + S_THUNK_TRUE + "))";
     }
-
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     /* ----------------------- Value & Interpreter ---------------------- */
@@ -826,4 +971,44 @@ public interface λ {
         }
     }
      */
+
+    /* ----------------------- Parser ---------------------- */
+    // 旧的 Parser, 使用 json array 当做 S表达式
+    /*
+    class JArrayParser {
+        final static javax.script.ScriptEngine engine
+                = new javax.script.ScriptEngineManager().getEngineByName("javascript");
+
+        public static Node parse(String s) {
+            return convert(decode(s));
+        }
+
+        // String ->  Map | List | String | Integer
+        static Object decode(String s) {
+            try {
+                return engine.eval("Java.asJSONCompatible(" + s + ")");
+            } catch (javax.script.ScriptException e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        static Node convert(Object n) {
+            if (n instanceof List) {
+                return new Tuple(((List<?>) n).stream().map(JArrayParser::convert).collect(toList()));
+            } else if (n instanceof Integer) {
+                return new Int(((Integer) n));
+            } else if (n instanceof String) {
+                String str = (String) n;
+                if (str.startsWith("\"")) {
+                    assert str.endsWith("\"");
+                    return new Str(str.substring(1, str.length() - 1));
+                } else {
+                    return new Name(((String) n));
+                }
+            } else {
+                throw new IllegalStateException();
+            }
+        }
+    }
+    */
 }
